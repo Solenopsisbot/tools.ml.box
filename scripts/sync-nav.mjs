@@ -16,7 +16,7 @@
  * bytes and reports no changes, so it is safe to run in a pre-commit hook.
  */
 
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOOLS } from '../src/lib/tools.js';
@@ -59,3 +59,34 @@ for (const page of pages) {
 }
 
 console.log(`\n${changed} of ${pages.length} pages rewritten from the tool registry.`);
+
+/* ------------------------------------------------------------ wiring --- */
+
+/**
+ * Verify the rest of the wiring while we are here.
+ *
+ * A tool needs five things (AGENTS.md section 3.2) and only two of them fail
+ * loudly on their own. A missing Vite entry ships a page that 404s in
+ * production but works in dev; a missing sitemap URL or cache header is
+ * invisible until someone notices the page is stale or unindexed. Checking
+ * them costs nothing and turns "read the docs carefully" into "run the script".
+ */
+const viteConfig = readFileSync(join(ROOT, 'vite.config.js'), 'utf8');
+const sitemap = readFileSync(join(ROOT, 'public', 'sitemap.xml'), 'utf8');
+const headers = readFileSync(join(ROOT, 'public', '_headers'), 'utf8');
+
+const problems = [];
+for (const tool of TOOLS) {
+	const page = fileForHref(tool.href);
+	if (!existsSync(join(ROOT, page))) problems.push(`${tool.href}: missing ${page}`);
+	if (!viteConfig.includes(`'${page}'`)) problems.push(`${tool.href}: no rollupOptions.input entry in vite.config.js`);
+	if (!sitemap.includes(`tools.ml.box${tool.href}<`)) problems.push(`${tool.href}: no URL in public/sitemap.xml`);
+	if (!headers.includes(`\n${tool.href}\n`)) problems.push(`${tool.href}: no revalidate rule in public/_headers`);
+}
+
+if (problems.length) {
+	console.error(`\n${problems.length} wiring problem(s):`);
+	for (const p of problems) console.error(`  ✕ ${p}`);
+	process.exit(1);
+}
+console.log(`${TOOLS.length} tools fully wired (html, vite entry, sitemap, headers).`);

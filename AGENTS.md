@@ -36,11 +36,15 @@ here by hand.** The CSS tokens in `src/style.css` mirror
 tools.ml.box/
 ├── index.html                # Tool directory
 ├── vram.html                 # /vram   — VRAM fit & inference speed
+├── serve.html                # /serve  — batched serving throughput
 ├── train.html                # /train  — finetune memory, time, cost
+├── quant.html                # /quant  — measured quantisation quality
+├── cost.html                 # /cost   — API cost & self-host crossover
 ├── vite.config.js            # Multi-page entries + extensionless-URL middleware
 ├── wrangler.toml
 ├── package.json              # ZERO runtime deps. Keep it that way.
 ├── scripts/
+│   ├── sync-nav.mjs          # projects the tool registry onto every <nav>
 │   ├── make-og-fonts.py      # woff2 -> static TTF instances + metrics (uv)
 │   ├── gen-og.mjs            # renders og.png + icon PNGs via resvg
 │   └── smoke.mjs             # real-Chrome smoke test of the built site
@@ -54,13 +58,19 @@ tools.ml.box/
     ├── bg-shader.js          # raw WebGL2 braid shader (ported from ml.box)
     ├── main.js               # index page entry
     ├── vram.js               # /vram entry
+    ├── serve-page.js         # /serve entry  (NOT serve.js — see §3.6)
     ├── train-page.js         # /train entry  (NOT train.js — see §3.6)
+    ├── quant-page.js         # /quant entry  (NOT quant.js — see §3.6)
+    ├── cost-page.js          # /cost  entry
     └── lib/
         ├── models.js         # model architectures (real config.json values)
         ├── quant.js          # bits-per-weight tables
         ├── hardware.js       # GPU / Apple / CPU specs
         ├── calc.js           # inference memory + speed maths
+        ├── serve.js          # continuous-batching throughput maths
         ├── train.js          # training memory + time + cost maths
+        ├── quality.js        # MEASURED perplexity data — see §4.4
+        ├── providers.js      # hosted API pricing + self-host comparison
         ├── tools.js          # tool registry (index page + nav)
         ├── urlstate.js       # form <-> query-string binding
         ├── format.js         # display & parsing helpers
@@ -85,13 +95,20 @@ Defaults are **elided** from the URL to keep it short. Changing a default
 therefore silently changes the meaning of every existing short link. Don't,
 unless you mean it.
 
-### 3.2 Adding a tool means three edits
-1. A new `<name>.html` at the repo root
-2. A new entry in `vite.config.js` under `build.rollupOptions.input`
-3. A new entry in `src/lib/tools.js`
+### 3.2 Adding a tool means five edits
+1. An entry in `src/lib/tools.js` (the registry — do this first)
+2. A new `<name>.html` at the repo root
+3. A new entry in `vite.config.js` under `build.rollupOptions.input`
+4. A URL in `public/sitemap.xml` and a revalidate rule in `public/_headers`
+5. `npm run nav` — projects the registry onto every page's `<nav>`
 
-Miss any one and you ship a page nobody can reach, or a link that 404s. Also
-add it to `public/sitemap.xml` and `public/_headers`.
+Miss one and you ship a page nobody can reach, or a link that 404s. The smoke
+test asserts that every registry href appears in the nav, which catches a
+forgotten step 5.
+
+**Never hand-edit a `<nav>` block.** With five static pages the header is
+physically duplicated five times; `scripts/sync-nav.mjs` exists so that
+duplication cannot drift. It is idempotent, so running it is always safe.
 
 ### 3.3 No inline style attributes. Ever.
 `public/_headers` sets `style-src 'self'` with **no** `unsafe-inline`. That
@@ -126,13 +143,15 @@ Relatedly: a CSS grid track defaults to `auto`, which sizes to **max-content**.
 Any grid holding a table needs `grid-template-columns: minmax(0, 1fr)` or it
 will grow past its parent.
 
-### 3.6 `src/train.js` does not exist — and must not
-The `/train` page entry is `src/train-page.js`. `src/lib/train.js` is the maths
-module. Naming the entry `src/train.js` would sit one directory above a
-same-named module and make every future import ambiguous to read.
+### 3.6 Page entries end in `-page.js` when a lib shares the name
+`/train`, `/serve` and `/quant` all have a maths or data module of the same
+name under `src/lib/`, so their entries are `src/train-page.js`,
+`src/serve-page.js` and `src/quant-page.js`. Naming an entry `src/train.js`
+would sit one directory above `src/lib/train.js` and make every future import
+ambiguous to read. `/vram` and `/cost` follow whichever form is unambiguous.
 
 ### 3.7 Boot last
-Both tool entries call `state.hydrate()` and `render()` as the **final**
+Every tool entry calls `state.hydrate()` and `render()` as the **final**
 statements in the file. `render()` reaches `const` lookup tables declared below
 its own definition; function declarations hoist, `const` bindings do not.
 Calling it earlier throws a temporal-dead-zone error before the page draws a
@@ -201,12 +220,52 @@ The non-obvious constants and why they exist:
 headline "Llama 3.1 8B QLoRA r=16, 2048 tokens, batch 2 fits in ~8 GB" comes
 out at ~8.0 GB here.
 
+`src/lib/serve.js` shares the bandwidth model but with a different batch
+term: weights are read once per decode step, KV once per sequence. Two
+constants differ deliberately — decode MFU is 0.25 rather than prefill's 0.5
+(batched decode GEMMs are skinny and never reach a long prompt's arithmetic
+intensity), and `KV_UTILISATION` is 0.90 to match vLLM's default.
+
+**Invariant:** `batchLadder()` returns an empty array when nothing fits. It
+used to clamp to `max(1, n)`, and an unservable configuration then quoted a
+throughput and a cost per token directly contradicting its own verdict. Any
+page that reports a derived figure must gate it on `runnable`.
+
 ### 4.3 Say when you are unsure
 Every tool page carries a "What this assumes" section stating the error bar
 (±20% inference, ±25% training) and the load-bearing assumptions. Keep it
 honest. If you add a term you are not confident in, say so on the page.
 
 ---
+
+### 4.4 `src/lib/quality.js` is measurements, not estimates
+
+Different rules apply to this file than to the rest of the site.
+
+- **Never interpolate and never extrapolate.** Where the dataset is silent the
+  UI renders "not measured". A plausible-looking number under a heading that
+  says *measured* is worse than an empty cell.
+- **`QUANT_TO_REFERENCE` must stay one-to-one.** It once mapped several
+  reference rows onto a single site-wide quant id, and the lookup returned
+  whichever came first in the array — so the tool reported Q4_K_S's damage
+  under Q4_K_M's name, roughly double the real figure. Reference rows with no
+  exact site-wide equivalent (Q3_K_S, Q3_K_L, Q4_K_S, Q5_0) appear in the
+  ladder and attach to nothing.
+- **Recommend by quality per byte, not by precision.** `RECOMMENDATION_ORDER`
+  starts at Q6_K, because Q6_K measures 0.07% damage at a third of FP16's
+  size. An earlier version picked the highest precision that fits and told
+  people to take FP16 on a page whose own table contradicts that.
+- **LLaMA-2 only, and say so.** It is the one family measured consistently
+  across every level on one harness. Stitching newer piecemeal measurements
+  together would produce a table that looks authoritative and is not.
+
+### 4.5 `src/lib/providers.js` will go stale
+
+There is no price feed — this is a static site. Every row carries a
+`confidence` (`published` vs `approximate`) that the UI renders, and
+`PRICES_AS_OF` is shown prominently. When you touch a number, update the date;
+when you are no longer sure a figure is current, downgrade it to `approximate`
+rather than leaving a stale `published` claim standing.
 
 ## 5. Data visualisation
 
@@ -248,6 +307,7 @@ npm run dev          # vite dev server on :5174
 npm run build        # production build -> ./dist
 npm run preview      # serve ./dist on :4174
 npm run smoke        # real-Chrome smoke test (needs preview running)
+npm run nav          # rewrite every page's <nav> from the tool registry
 npm run og           # regenerate og.png + all icon PNGs
 ```
 
@@ -291,6 +351,9 @@ npm run og
 ```
 
 Requires [`uv`](https://docs.astral.sh/uv/) on PATH and network access to PyPI.
+On a network with a TLS-inspecting proxy, `uv` needs the extra root CA — pass
+`--system-certs` or set `SSL_CERT_FILE` — or skip stage one entirely by copying
+the cached TTFs across, as below.
 Two stages, for a non-obvious reason: resvg cannot read woff2, and it cannot be
 trusted with variable-font axes — Outfit's `wght` axis defaults to 100, so
 handing resvg the variable font silently yields a Thin wordmark. Stage one
@@ -310,10 +373,29 @@ then re-run. Commit the resulting PNGs — they are served assets.
 
 ```bash
 CLOUDFLARE_ACCOUNT_ID="7ce2ff65bcdfde3b27345384c3de0d8c" \
-  npx wrangler pages deploy dist --project-name tools-ml-box
+  npx wrangler pages deploy dist --project-name tools-ml-box --branch main
 ```
 
-The Pages project needs `tools.ml.box` added as a custom domain.
+The custom domain `tools.ml.box` is already attached. Wrangler 3 has no
+`pages domain` subcommand — attaching one goes through the API:
+
+```bash
+TOK=$(grep '^oauth_token' ~/Library/Preferences/.wrangler/config/default.toml | sed 's/.*= *"\(.*\)"/\1/')
+curl -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+  --data '{"name":"tools.ml.box"}' \
+  "https://api.cloudflare.com/client/v4/accounts/7ce2ff65bcdfde3b27345384c3de0d8c/pages/projects/tools-ml-box/domains"
+```
+
+Cloudflare creates the DNS record itself, because the zone is in the same
+account. Note that wrangler's OAuth token carries `pages:write` and `zone:read`
+but **not** DNS scope, so a direct `dns_records` call returns an auth error —
+go through the Pages endpoint.
+
+Smoke-test the deployment, not just the local build:
+
+```bash
+SMOKE_URL="https://tools.ml.box" npm run smoke
+```
 
 ---
 
@@ -322,12 +404,14 @@ The Pages project needs `tools.ml.box` added as a custom domain.
 Before declaring a change complete:
 
 1. `npm run build` succeeds in well under a second
-2. `dist/` contains `index.html`, `vram.html`, `train.html`, `_headers`,
-   `og.png`, `fonts/`, and hashed `assets/`
-3. `npm run smoke` passes every check
+2. `dist/` contains every page's `.html`, plus `_headers`, `og.png`, `fonts/`
+   and hashed `assets/`
+3. `npm run smoke` passes every check, locally **and** against the deployment
 4. Gzipped JS per page is still single-digit KB — if it jumped, something
    pulled in a dependency
-5. If you touched `src/lib/calc.js` or `src/lib/train.js`, re-check the
-   calibration table in §4.2
-6. If you touched the palette, re-run the colour validator
-7. Git tree clean and pushed
+5. If you touched `calc.js`, `serve.js` or `train.js`, re-check the calibration
+   table in §4.2
+6. If you touched `quality.js`, re-read §4.4 — that file has stricter rules
+7. If you touched the palette, re-run the colour validator
+8. If you added or renamed a tool, `npm run nav` and check all five edits in §3.2
+9. Git tree clean and pushed
