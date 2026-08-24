@@ -103,10 +103,16 @@ try {
 		check('no console errors / failed requests', errors.length === 0, errors.join(' | '));
 
 		const tools = await page.$$eval('#tool-list a.tool-card', (els) => els.map((e) => e.getAttribute('href')));
-		check('tool cards rendered from the registry', tools.length >= 2, tools.join(', '));
+		check('tool cards rendered from the registry', tools.length >= 5, tools.join(', '));
+
+		// The nav is duplicated across every page and kept in sync by
+		// `npm run nav`. If someone edits a page by hand the copies drift, and
+		// the drift is invisible until you happen to be on the wrong page.
+		const navHrefs = await page.$$eval('.site-nav a', (els) => els.map((e) => e.getAttribute('href')));
+		check('nav matches the tool registry', tools.every((h) => navHrefs.includes(h)), navHrefs.join(', '));
 
 		const planned = await page.$$eval('#planned-list li', (els) => els.length);
-		check('planned list rendered', planned >= 6, `${planned} entries`);
+		check('planned list rendered', planned >= 3, `${planned} entries`);
 
 		const gl = await page.evaluate(() => {
 			const c = document.getElementById('webgl-canvas');
@@ -128,7 +134,7 @@ try {
 
 	/* -------------------------------------------------- extensionless URLs -- */
 	console.log('\nextensionless routing (matches Cloudflare Pages)');
-	for (const path of ['/vram', '/train']) {
+	for (const path of ['/vram', '/serve', '/train', '/quant', '/cost']) {
 		const { page } = await newPage(browser);
 		const res = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
 		check(`${path} serves 200`, res.status() === 200, `status ${res.status()}`);
@@ -277,19 +283,138 @@ try {
 		await page.close();
 	}
 
+
+	/* ------------------------------------------------------------- serve -- */
+	console.log('\n/serve');
+	{
+		const { page, errors } = await newPage(browser);
+		await page.goto(`${BASE}/serve?p=llama-3.1-8b&ctx=4k&t=15`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 600));
+		check('no console errors (incl. CSP violations)', errors.length === 0, errors.join(' | '));
+
+		const r = await page.evaluate(() => ({
+			verdict: document.querySelector('#verdict-title').textContent,
+			users: document.querySelector('#stat-users').textContent,
+			total: document.querySelector('#stat-total').textContent,
+			ladder: document.querySelectorAll('#ladder-rows tr').length,
+			legend: document.querySelectorAll('#legend li').length,
+			segments: document.querySelectorAll('#meter .meter-seg').length,
+		}));
+		check('verdict populated', r.verdict.length > 3, r.verdict);
+		check('concurrency computed', /[0-9]/.test(r.users), r.users);
+		check('throughput computed', /[0-9]/.test(r.total), r.total);
+		check('batch ladder populated', r.ladder >= 4, `${r.ladder} rows`);
+		check('memory meter rendered', r.segments === 4 && r.legend === 5, `${r.segments} segs / ${r.legend} legend`);
+
+		// Long context must collapse concurrency — that is the tool's whole point.
+		// At 128k an 8B needs 17 GB of KV per sequence, so a 24 GB card cannot
+		// hold even one alongside the weights. Accept either a tiny ceiling or
+		// the explicit "cannot serve one request" verdict.
+		await page.goto(`${BASE}/serve?p=llama-3.1-8b&ctx=128k&t=15`, { waitUntil: 'networkidle0' });
+		await new Promise((r2) => setTimeout(r2, 400));
+		const long = await page.evaluate(() => ({
+			sub: document.querySelector('#stat-users-sub').textContent,
+			users: document.querySelector('#stat-users').textContent,
+		}));
+		check(
+			'long context collapses concurrency',
+			Number.parseInt(long.users, 10) <= 4,
+			`${long.users} — ${long.sub}`,
+		);
+		// An unservable configuration must not also quote a throughput and a
+		// price — those contradict its own verdict.
+		const consistent = await page.evaluate(() => ({
+			total: document.querySelector('#stat-total').textContent,
+			cost: document.querySelector('#stat-cost').textContent,
+			ladder: document.querySelectorAll('#ladder-rows tr').length,
+		}));
+		check(
+			'unservable config quotes no throughput or cost',
+			consistent.total.startsWith('—') && consistent.cost === '—',
+			JSON.stringify(consistent),
+		);
+
+		await page.screenshot({ path: join(OUT, 'serve.png'), fullPage: true });
+		await page.close();
+	}
+
+	/* ------------------------------------------------------------- quant -- */
+	console.log('\n/quant');
+	{
+		const { page, errors } = await newPage(browser);
+		await page.goto(`${BASE}/quant?p=llama-3.1-8b&vram=24&ctx=8k`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 600));
+		check('no console errors (incl. CSP violations)', errors.length === 0, errors.join(' | '));
+
+		const r = await page.evaluate(() => ({
+			verdict: document.querySelector('#verdict-title').textContent,
+			ladder: document.querySelectorAll('#ladder-rows tr').length,
+			fit: document.querySelectorAll('#fit-rows tr').length,
+			findings: document.querySelectorAll('#findings li').length,
+			// The measured table must never invent a value for a format the
+			// dataset does not cover.
+			notMeasured: [...document.querySelectorAll('#fit-rows tr')].filter((tr) =>
+				tr.textContent.includes('not measured'),
+			).length,
+		}));
+		check('verdict populated', r.verdict.length > 3, r.verdict);
+		check('measured ladder populated', r.ladder === 12, `${r.ladder} rows`);
+		check('fit table populated', r.fit >= 14, `${r.fit} rows`);
+		check('findings rendered', r.findings === 5, `${r.findings}`);
+		check('unmeasured formats are marked, not interpolated', r.notMeasured >= 3, `${r.notMeasured}`);
+
+		await page.screenshot({ path: join(OUT, 'quant.png'), fullPage: true });
+		await page.close();
+	}
+
+	/* -------------------------------------------------------------- cost -- */
+	console.log('\n/cost');
+	{
+		const { page, errors } = await newPage(browser);
+		await page.goto(`${BASE}/cost?api=sonnet-5&req=100,000&in=2k&out=512`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 600));
+		check('no console errors (incl. CSP violations)', errors.length === 0, errors.join(' | '));
+
+		const r = await page.evaluate(() => ({
+			verdict: document.querySelector('#verdict-title').textContent,
+			api: document.querySelector('#stat-api').textContent,
+			self: document.querySelector('#stat-self').textContent,
+			util: document.querySelector('#stat-util').textContent,
+			providers: document.querySelectorAll('#provider-rows tr').length,
+			selfRows: document.querySelectorAll('#self-rows tr').length,
+		}));
+		check('verdict populated', r.verdict.length > 3, r.verdict);
+		check('API cost computed', r.api.startsWith('$'), r.api);
+		check('self-host cost computed', r.self.startsWith('$'), r.self);
+		check('utilisation computed', r.util.endsWith('%'), r.util);
+		check('provider table populated', r.providers >= 14, `${r.providers} rows`);
+		check('self-host working shown', r.selfRows === 8, `${r.selfRows} rows`);
+
+		// The cache slider must actually change the answer.
+		const before = r.api;
+		await page.goto(`${BASE}/cost?api=sonnet-5&req=100,000&in=2k&out=512&c=90`, { waitUntil: 'networkidle0' });
+		await new Promise((r2) => setTimeout(r2, 400));
+		const after = await page.evaluate(() => document.querySelector('#stat-api').textContent);
+		check('prompt caching reduces the bill', after !== before, `${before} -> ${after}`);
+
+		await page.screenshot({ path: join(OUT, 'cost.png'), fullPage: true });
+		await page.close();
+	}
+
 	/* ------------------------------------------------- robustness & a11y -- */
 	console.log('\nrobustness');
 	{
 		const { page, errors } = await newPage(browser);
 		// Garbage in the query string is arbitrary text from a stranger. It must
 		// degrade to a sensible default, never blank the page.
-		await page.goto(`${BASE}/vram?p=<script>&d=nonsense&ctx=-5&b=abc&hw=potato&n=999`, {
-			waitUntil: 'networkidle0',
-		});
-		await new Promise((r) => setTimeout(r, 500));
-		check('hostile query string does not throw', errors.length === 0, errors.join(' | '));
-		const still = await page.evaluate(() => document.querySelector('#stat-total').textContent);
-		check('hostile query string still renders a result', /GB|MB/.test(still), still);
+		const junk = '?p=<script>&d=nonsense&ctx=-5&b=abc&hw=potato&n=999&api=nope&req=-1&c=999&f=fake';
+		for (const path of ['/vram', '/serve', '/train', '/quant', '/cost']) {
+			await page.goto(`${BASE}${path}${junk}`, { waitUntil: 'networkidle0' });
+			await new Promise((r) => setTimeout(r, 350));
+			const rendered = await page.evaluate(() => document.querySelector('#verdict-title')?.textContent ?? '');
+			check(`${path} survives a hostile query string`, rendered.length > 3, rendered);
+		}
+		check('no errors from any hostile query string', errors.length === 0, errors.join(' | '));
 		await page.close();
 	}
 

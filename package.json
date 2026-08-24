@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --port 4174",
     "og": "uv run --with 'fonttools[woff]' python scripts/make-og-fonts.py && node scripts/gen-og.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "nav": "node scripts/sync-nav.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

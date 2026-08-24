@@ -1,26 +1,50 @@
 /**
  * The tool registry.
  *
- * Single source of truth for the index page and the header nav. Adding a tool
- * means: a new entry here, a new `.html` at the repo root, and a new entry in
- * `vite.config.js` under `rollupOptions.input`. All three, or the build will
- * quietly ship a page nobody can reach.
+ * Single source of truth for the index page AND the header nav — run
+ * `npm run nav` after editing this and every page's <nav> is rewritten from
+ * `navLabel` below, so the five copies cannot drift apart.
+ *
+ * Adding a tool means four things: an entry here, a new `.html` at the repo
+ * root, an entry in `vite.config.js` under `rollupOptions.input`, and a URL in
+ * `public/sitemap.xml`. Miss one and you ship a page nobody can reach.
  */
 
 export const TOOLS = [
 	{
 		href: '/vram',
 		name: 'VRAM & speed',
+		navLabel: 'VRAM',
 		blurb: 'Will this model fit, and how fast will it run? Real attention shapes, honest KV cache, bandwidth-bound throughput.',
 		tags: ['inference', 'memory', 'throughput'],
-		status: 'live',
+	},
+	{
+		href: '/serve',
+		name: 'Batch throughput',
+		navLabel: 'Serving',
+		blurb: 'How many concurrent users one GPU can serve at a target latency, and what that costs per million tokens.',
+		tags: ['serving', 'batching', 'latency'],
 	},
 	{
 		href: '/train',
 		name: 'Finetune cost',
+		navLabel: 'Finetune',
 		blurb: 'LoRA and QLoRA memory, wall-clock time and rental cost for a given dataset, sequence length and GPU.',
 		tags: ['training', 'lora', 'cost'],
-		status: 'live',
+	},
+	{
+		href: '/quant',
+		name: 'Quantisation quality',
+		navLabel: 'Quants',
+		blurb: 'The measured perplexity cost of every quantisation level, and when a bigger model at lower precision wins.',
+		tags: ['quality', 'gguf', 'measured'],
+	},
+	{
+		href: '/cost',
+		name: 'API cost & self-hosting',
+		navLabel: 'Cost',
+		blurb: 'What a workload costs across hosted providers, and the token volume at which renting a GPU becomes cheaper.',
+		tags: ['pricing', 'api', 'break-even'],
 	},
 ];
 
@@ -33,24 +57,8 @@ export const TOOLS = [
  */
 export const PLANNED = [
 	{
-		name: 'Quant quality ladder',
-		blurb: 'Perplexity and KL-divergence deltas per quantisation level, so "is Q4 good enough" stops being a vibe.',
-	},
-	{
-		name: 'API price comparison',
-		blurb: 'Cost per million tokens across hosted providers for an equivalent model, including cache-hit pricing.',
-	},
-	{
 		name: 'Context cost calculator',
 		blurb: 'What a long system prompt actually costs you per request, in money and in time-to-first-token.',
-	},
-	{
-		name: 'Batch throughput planner',
-		blurb: 'Concurrent users a given GPU can serve at a target p95 latency — the number that decides whether you self-host.',
-	},
-	{
-		name: 'Tokenizer explorer',
-		blurb: 'Paste text, see it split by several tokenizers side by side, with tokens-per-word ratios for non-English scripts.',
 	},
 	{
 		name: 'Multi-GPU planner',

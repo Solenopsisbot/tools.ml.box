@@ -11,7 +11,22 @@
     <priority>0.9</priority>
   </url>
   <url>
+    <loc>https://tools.ml.box/serve</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
     <loc>https://tools.ml.box/train</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://tools.ml.box/quant</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://tools.ml.box/cost</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>Serving throughput calculator — tools.ml.box</title>
+  <meta name="description" content="How many concurrent users one GPU can serve at a target latency. Continuous batching, KV-cache concurrency ceilings, and cost per million tokens.">
+  <link rel="canonical" href="https://tools.ml.box/serve">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/serve">
+  <meta property="og:title" content="Serving throughput calculator — tools.ml.box">
+  <meta property="og:description" content="How many concurrent users one GPU can serve at a target latency. Continuous batching, KV-cache concurrency ceilings, and cost per million tokens.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Serving throughput calculator — tools.ml.box">
+  <meta name="twitter:description" content="How many concurrent users one GPU can serve at a target latency. Continuous batching, KV-cache concurrency ceilings, and cost per million tokens.">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram">VRAM</a>
+        <a class="nav-link" href="/serve" aria-current="page">Serving</a>
+        <a class="nav-link" href="/train">Finetune</a>
+        <a class="nav-link" href="/quant">Quants</a>
+        <a class="nav-link" href="/cost">Cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">Serving</p>
+        <h1 class="page-title">Batch throughput</h1>
+        <p class="page-lede">
+          How many people one GPU can serve at once before the experience gets
+          bad. Weights are read once per decode step and the KV cache is read
+          per sequence, so batching multiplies total throughput while barely
+          touching per-user speed — until the cache runs out of room.
+        </p>
+      </div>
+
+      <div class="tool-grid">
+
+        <form class="panel panel-pad controls" id="controls" autocomplete="off">
+          <h2 class="panel-title">Workload</h2>
+
+          <div class="field">
+            <label class="field-label" for="model">Model</label>
+            <select id="model"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="quant">
+              Weight quantisation
+              <span class="field-hint" id="quant-bpw"></span>
+            </label>
+            <select id="quant"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="ctx">Avg sequence</label>
+              <input type="text" id="ctx" inputmode="numeric" spellcheck="false" placeholder="4k">
+            </div>
+            <div class="field">
+              <label class="field-label" for="kv">KV cache</label>
+              <select id="kv"></select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="target">
+              Min speed per user
+              <span class="field-hint">tok/s</span>
+            </label>
+            <input type="number" id="target" min="1" max="500" step="1">
+          </div>
+
+          <h2 class="panel-title mt-lg">Hardware</h2>
+
+          <div class="field">
+            <label class="field-label" for="hw">Accelerator</label>
+            <select id="hw"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="vram">Memory (GB)</label>
+              <input type="number" id="vram" min="1" max="2048" step="1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="count">How many</label>
+              <input type="number" id="count" min="1" max="64" step="1">
+            </div>
+          </div>
+
+          <button class="btn btn-full mt-md" type="button" id="share">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="btn-text">Copy link to this result</span>
+          </button>
+        </form>
+
+        <div class="result-stack">
+
+          <div class="verdict" id="verdict" role="status" aria-live="polite">
+            <span class="verdict-icon" id="verdict-icon"></span>
+            <div>
+              <p class="verdict-title" id="verdict-title">—</p>
+              <p class="verdict-detail" id="verdict-detail"></p>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <p class="stat-label">Concurrent users</p>
+              <p class="stat-value" id="stat-users">—</p>
+              <p class="stat-sub" id="stat-users-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Total throughput</p>
+              <p class="stat-value" id="stat-total">—<span class="stat-unit">tok/s</span></p>
+              <p class="stat-sub" id="stat-total-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Per user</p>
+              <p class="stat-value" id="stat-user">—<span class="stat-unit">tok/s</span></p>
+              <p class="stat-sub" id="stat-user-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Cost / M tokens</p>
+              <p class="stat-value" id="stat-cost">—</p>
+              <p class="stat-sub" id="stat-cost-sub"></p>
+            </div>
+          </div>
+
+          <section class="panel panel-pad" aria-labelledby="ceiling-title">
+            <h2 class="panel-title" id="ceiling-title">Where the memory goes</h2>
+            <div class="meter">
+              <div class="meter-track" id="meter" role="img" aria-labelledby="meter-desc"></div>
+              <p class="visually-hidden" id="meter-desc"></p>
+              <div class="meter-scale">
+                <span>0</span>
+                <span id="meter-budget-label"></span>
+              </div>
+            </div>
+            <ul class="legend" id="legend"></ul>
+            <p class="note-inline" id="ceiling-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="ladder-title">
+            <h2 class="panel-title" id="ladder-title">Batch ladder</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>Throughput and latency at each concurrency level</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Concurrent</th>
+                    <th scope="col" class="num">Per user</th>
+                    <th scope="col" class="num">Total</th>
+                    <th scope="col" class="num">KV used</th>
+                    <th scope="col">Bound by</th>
+                    <th scope="col" class="num">$ / M tok</th>
+                  </tr>
+                </thead>
+                <tbody id="ladder-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="ladder-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="assumptions-title">
+            <h2 class="panel-title" id="assumptions-title">What this assumes</h2>
+            <ul class="notes">
+              <li>
+                <strong>Weights once, KV per sequence.</strong> A decode step reads
+                the active weights a single time no matter how many sequences are in
+                flight, then reads each sequence's cache. That asymmetry is the whole
+                reason batching works, and why long contexts destroy it — at 32k the
+                cache dwarfs the weights and the per-step read scales with users again.
+              </li>
+              <li>
+                <strong>Concurrency is usually memory-limited, not compute-limited.</strong>
+                On most cards you run out of room for KV caches long before you run
+                out of FLOPs. The ladder marks which constraint binds at each level.
+              </li>
+              <li>
+                <strong>10% of VRAM is held back.</strong> vLLM defaults
+                <code>gpu_memory_utilization</code> to 0.90, and a paged allocator
+                needs slack to avoid preemption thrash under bursty arrival. Sizing to
+                100% of free memory builds a server that OOMs in its first bad minute.
+              </li>
+              <li>
+                <strong>This is steady-state throughput, not p95 latency.</strong>
+                It assumes every slot is full and arrival is smooth. Real traffic is
+                bursty, queueing adds delay before a request starts decoding, and
+                prefill competes with decode for the same GPU. Size for less than this.
+              </li>
+              <li>
+                <strong>Decode MFU is 25%.</strong> Batched decode GEMMs are skinny —
+                batch × hidden against hidden × hidden — so they never reach the
+                arithmetic intensity a long prompt does, even at large batch.
+              </li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/serve-page.js"></script>
+</body>
+</html>

@@ -49,5 +49,11 @@
   Cache-Control: public, max-age=0, must-revalidate
 /vram
   Cache-Control: public, max-age=0, must-revalidate
+/serve
+  Cache-Control: public, max-age=0, must-revalidate
 /train
+  Cache-Control: public, max-age=0, must-revalidate
+/quant
+  Cache-Control: public, max-age=0, must-revalidate
+/cost
   Cache-Control: public, max-age=0, must-revalidate

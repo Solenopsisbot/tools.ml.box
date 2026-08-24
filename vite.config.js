@@ -47,7 +47,10 @@ export default defineConfig({
 			input: {
 				index: 'index.html',
 				vram: 'vram.html',
+				serve: 'serve.html',
 				train: 'train.html',
+				quant: 'quant.html',
+				cost: 'cost.html',
 			},
 		},
 	},

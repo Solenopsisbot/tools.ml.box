@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>API cost vs self-hosting — tools.ml.box</title>
+  <meta name="description" content="What a hosted LLM workload costs per month across providers, and the token volume at which renting your own GPU becomes cheaper.">
+  <link rel="canonical" href="https://tools.ml.box/cost">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/cost">
+  <meta property="og:title" content="API cost vs self-hosting — tools.ml.box">
+  <meta property="og:description" content="What a hosted LLM workload costs per month across providers, and the token volume at which renting your own GPU becomes cheaper.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="API cost vs self-hosting — tools.ml.box">
+  <meta name="twitter:description" content="What a hosted LLM workload costs per month across providers, and the token volume at which renting your own GPU becomes cheaper.">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram">VRAM</a>
+        <a class="nav-link" href="/serve">Serving</a>
+        <a class="nav-link" href="/train">Finetune</a>
+        <a class="nav-link" href="/quant">Quants</a>
+        <a class="nav-link" href="/cost" aria-current="page">Cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">Cost</p>
+        <h1 class="page-title">API cost &amp; the self-host crossover</h1>
+        <p class="page-lede">
+          What your workload costs on a hosted API, and the monthly token volume
+          at which renting a GPU beats paying per token. The answer usually turns
+          on utilisation rather than on hardware: a rented card bills by the hour
+          whether or not you are sending it work.
+        </p>
+      </div>
+
+      <div class="tool-grid">
+
+        <form class="panel panel-pad controls" id="controls" autocomplete="off">
+          <h2 class="panel-title">Workload</h2>
+
+          <div class="field">
+            <label class="field-label" for="provider">Hosted model</label>
+            <select id="provider"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="requests">Requests / month</label>
+            <input type="text" id="requests" inputmode="numeric" spellcheck="false" placeholder="100k">
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="intok">Input tokens</label>
+              <input type="text" id="intok" inputmode="numeric" spellcheck="false" placeholder="2k">
+            </div>
+            <div class="field">
+              <label class="field-label" for="outtok">Output tokens</label>
+              <input type="text" id="outtok" inputmode="numeric" spellcheck="false" placeholder="500">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="cached">
+              Input from cache
+              <span class="field-hint" id="cached-hint"></span>
+            </label>
+            <input type="range" id="cached" min="0" max="95" step="5">
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="batch-label">Request tier</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="batch-label">
+              <input type="radio" name="tier" id="tier-sync" value="0">
+              <label for="tier-sync">Realtime</label>
+              <input type="radio" name="tier" id="tier-batch" value="1">
+              <label for="tier-batch">Batch</label>
+            </div>
+          </div>
+
+          <h2 class="panel-title mt-lg">Self-host alternative</h2>
+
+          <div class="field">
+            <label class="field-label" for="model">Open-weight model</label>
+            <select id="model"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="quant">Quant</label>
+            <select id="quant"></select>
+          </div>
+
+          <!-- Own row, not half of a pair: at 150px the rental price in the
+               option label clips to "$0.4" and reads as a wrong number. -->
+          <div class="field">
+            <label class="field-label" for="hw">GPU</label>
+            <select id="hw"></select>
+          </div>
+
+          <button class="btn btn-full mt-md" type="button" id="share">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="btn-text">Copy link to this result</span>
+          </button>
+        </form>
+
+        <div class="result-stack">
+
+          <div class="verdict" id="verdict" role="status" aria-live="polite">
+            <span class="verdict-icon" id="verdict-icon"></span>
+            <div>
+              <p class="verdict-title" id="verdict-title">—</p>
+              <p class="verdict-detail" id="verdict-detail"></p>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <p class="stat-label">API / month</p>
+              <p class="stat-value" id="stat-api">—</p>
+              <p class="stat-sub" id="stat-api-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Self-host / month</p>
+              <p class="stat-value" id="stat-self">—</p>
+              <p class="stat-sub" id="stat-self-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">GPU utilisation</p>
+              <p class="stat-value" id="stat-util">—</p>
+              <p class="stat-sub" id="stat-util-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Break-even</p>
+              <p class="stat-value" id="stat-break">—</p>
+              <p class="stat-sub" id="stat-break-sub">tokens/month for the rig to win</p>
+            </div>
+          </div>
+
+          <section class="panel panel-pad" aria-labelledby="providers-title">
+            <h2 class="panel-title" id="providers-title">Same workload, every provider</h2>
+            <div class="table-wrap">
+              <table>
+                <caption id="providers-caption">Monthly cost for this workload</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Model</th>
+                    <th scope="col" class="num">$/M in</th>
+                    <th scope="col" class="num">$/M out</th>
+                    <th scope="col" class="num">Per request</th>
+                    <th scope="col" class="num">Per month</th>
+                  </tr>
+                </thead>
+                <tbody id="provider-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="prices-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="self-title">
+            <h2 class="panel-title" id="self-title">The self-hosting arithmetic</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>What the rig actually has to do</caption>
+                <tbody id="self-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="self-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="assumptions-title">
+            <h2 class="panel-title" id="assumptions-title">What this assumes</h2>
+            <ul class="notes">
+              <li>
+                <strong>Utilisation decides everything.</strong> A rented GPU bills by
+                the hour whether or not there is work for it, so cost per token is a
+                property of how busy you keep the card rather than of the card. At 3%
+                utilisation you are paying roughly thirty times the marginal rate.
+              </li>
+              <li>
+                <strong>The self-host figure counts prefill.</strong> Prompt processing
+                occupies the GPU too, and for a RAG-shaped workload with a long prompt
+                and a short answer it is often most of the work. Estimates that count
+                only generated tokens understate the bill badly.
+              </li>
+              <li>
+                <strong>It ignores everything that is not the GPU.</strong> No
+                engineering time, no on-call, no model upgrades, no spare capacity for
+                traffic spikes, no egress, no storage for weights. A hosted API is
+                considerably more than a rental with a markup, so the break-even volume
+                here is a floor, not a decision.
+              </li>
+              <li>
+                <strong>Throughput comes from the serving model.</strong> The
+                self-hosted rate is the batched figure from
+                <a href="/serve">/serve</a> at this model, quant and context — not the
+                single-stream number, which would understate a real server by an order
+                of magnitude.
+              </li>
+              <li>
+                <strong>Prices go stale.</strong> There is no price feed here; it is a
+                static site. Rows marked approximate are representative market rates
+                rather than quotes. Check before you budget.
+              </li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/cost-page.js"></script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>Quantisation quality — tools.ml.box</title>
+  <meta name="description" content="The measured perplexity cost of every GGUF quantisation level, from the published llama.cpp runs. Which quant to download, and when a bigger model at lower precision wins.">
+  <link rel="canonical" href="https://tools.ml.box/quant">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/quant">
+  <meta property="og:title" content="Quantisation quality — tools.ml.box">
+  <meta property="og:description" content="The measured perplexity cost of every GGUF quantisation level, from the published llama.cpp runs. Which quant to download, and when a bigger model at lower precision wins.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Quantisation quality — tools.ml.box">
+  <meta name="twitter:description" content="The measured perplexity cost of every GGUF quantisation level, from the published llama.cpp runs. Which quant to download, and when a bigger model at lower precision wins.">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram">VRAM</a>
+        <a class="nav-link" href="/serve">Serving</a>
+        <a class="nav-link" href="/train">Finetune</a>
+        <a class="nav-link" href="/quant" aria-current="page">Quants</a>
+        <a class="nav-link" href="/cost">Cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">Quality</p>
+        <h1 class="page-title">Quantisation quality</h1>
+        <p class="page-lede">
+          What each quantisation level actually costs you, taken from the
+          published llama.cpp perplexity runs. Unlike the rest of this site
+          these are measurements rather than estimates — so the job here is to
+          present them clearly and be explicit about what they do not cover.
+        </p>
+      </div>
+
+      <div class="tool-grid">
+
+        <form class="panel panel-pad controls" id="controls" autocomplete="off">
+          <h2 class="panel-title">Compare</h2>
+
+          <div class="field">
+            <label class="field-label" for="family">Reference measurements</label>
+            <select id="family"></select>
+          </div>
+
+          <h2 class="panel-title mt-lg">Your situation</h2>
+
+          <div class="field">
+            <label class="field-label" for="model">Model</label>
+            <select id="model"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="ctx">Context</label>
+              <input type="text" id="ctx" inputmode="numeric" spellcheck="false" placeholder="8k">
+            </div>
+            <div class="field">
+              <label class="field-label" for="vram">Budget (GB)</label>
+              <input type="number" id="vram" min="1" max="2048" step="1">
+            </div>
+          </div>
+
+          <button class="btn btn-full mt-md" type="button" id="share">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="btn-text">Copy link to this result</span>
+          </button>
+        </form>
+
+        <div class="result-stack">
+
+          <div class="verdict" id="verdict" role="status" aria-live="polite">
+            <span class="verdict-icon" id="verdict-icon"></span>
+            <div>
+              <p class="verdict-title" id="verdict-title">—</p>
+              <p class="verdict-detail" id="verdict-detail"></p>
+            </div>
+          </div>
+
+          <section class="panel panel-pad" aria-labelledby="fit-title">
+            <h2 class="panel-title" id="fit-title">What fits your budget</h2>
+            <div class="table-wrap">
+              <table>
+                <caption id="fit-caption">Your model at each quantisation level</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Quant</th>
+                    <th scope="col" class="num">Weights</th>
+                    <th scope="col" class="num">Total</th>
+                    <th scope="col">Fits</th>
+                    <th scope="col" class="num">Quality cost</th>
+                  </tr>
+                </thead>
+                <tbody id="fit-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="fit-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="ladder-title">
+            <h2 class="panel-title" id="ladder-title">Measured quality ladder</h2>
+            <div class="table-wrap">
+              <table>
+                <caption id="ladder-caption">Perplexity cost by quantisation level</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Quant</th>
+                    <th scope="col" class="num">Perplexity</th>
+                    <th scope="col" class="num">vs FP16</th>
+                    <th scope="col" class="num">% worse</th>
+                    <th scope="col">Damage</th>
+                  </tr>
+                </thead>
+                <tbody id="ladder-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="modern-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="findings-title">
+            <h2 class="panel-title" id="findings-title">What the numbers say</h2>
+            <ul class="notes" id="findings"></ul>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="source-title">
+            <h2 class="panel-title" id="source-title">Where this comes from</h2>
+            <ul class="notes">
+              <li>
+                <strong>Published llama.cpp perplexity runs</strong> on wikitext-2,
+                measured against each model's own FP16 baseline. The absolute
+                perplexity is meaningless across models — only the delta from that
+                model's own baseline says anything about quantisation damage, which
+                is why this table leads with the delta.
+              </li>
+              <li>
+                <strong>LLaMA-2 is used because it is the only complete ladder.</strong>
+                It is the one family measured consistently across every level from
+                Q2_K to Q8_0 on one harness. Newer models are measured piecemeal by
+                different people under different settings, and stitching those together
+                would produce a table that looks authoritative and is not.
+              </li>
+              <li>
+                <strong>Perplexity is a proxy, not the thing you care about.</strong>
+                It correlates with capability but does not capture instruction
+                following, tool-call formatting or long-context recall — all of which
+                degrade faster than perplexity suggests. A quant that looks fine here
+                can still break structured output.
+              </li>
+              <li>
+                <strong>Importance-matrix quants beat these numbers.</strong> The IQ
+                formats use a calibration pass to decide which weights matter and land
+                meaningfully better than the legacy formats at the same size. They
+                arrived after this dataset was measured, so they are absent from the
+                ladder — treat their entries in the fit table as sized, not scored.
+              </li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/quant-page.js"></script>
+</body>
+</html>
