@@ -376,8 +376,8 @@ CLOUDFLARE_ACCOUNT_ID="7ce2ff65bcdfde3b27345384c3de0d8c" \
   npx wrangler pages deploy dist --project-name tools-ml-box --branch main
 ```
 
-The custom domain `tools.ml.box` is already attached. Wrangler 3 has no
-`pages domain` subcommand — attaching one goes through the API:
+Attaching a custom domain takes **two** steps, and wrangler 3 has no
+`pages domain` subcommand for either. First register it with the Pages API:
 
 ```bash
 TOK=$(grep '^oauth_token' ~/Library/Preferences/.wrangler/config/default.toml | sed 's/.*= *"\(.*\)"/\1/')
@@ -386,10 +386,24 @@ curl -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"
   "https://api.cloudflare.com/client/v4/accounts/7ce2ff65bcdfde3b27345384c3de0d8c/pages/projects/tools-ml-box/domains"
 ```
 
-Cloudflare creates the DNS record itself, because the zone is in the same
-account. Note that wrangler's OAuth token carries `pages:write` and `zone:read`
-but **not** DNS scope, so a direct `dns_records` call returns an auth error —
-go through the Pages endpoint.
+Then create the DNS record. **Cloudflare does not create it for you on this
+path.** The dashboard flow does; the API call above only registers the domain
+and leaves it `status: pending` forever while the hostname stays NXDOMAIN.
+
+Wrangler's OAuth token carries `pages:write` and `zone:read` but **no DNS
+scope**, so it cannot create the record — a `dns_records` POST returns
+`10000 Authentication error`. You need either the dashboard or a scoped API
+token (`Zone → DNS → Edit` on the `ml.box` zone):
+
+```bash
+curl -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"type":"CNAME","name":"tools","content":"tools-ml-box.pages.dev","proxied":true}' \
+  "https://api.cloudflare.com/client/v4/zones/bbfb65cdbc01b8fbc51d84fe0801c0da/dns_records"
+```
+
+The domain moves from `pending` to `active` within a few minutes of the record
+appearing, once the certificate is issued.
 
 Smoke-test the deployment, not just the local build:
 
