@@ -4,11 +4,12 @@ import {
 } from './lib/page.js';
 import { UrlState, initShareButton } from './lib/urlstate.js';
 import { MODEL_GROUPS, resolveModel } from './lib/models.js';
+import { CUSTOM_ID, mountCustomFields, decodeCustom, encodeCustom, resolveWithCustom } from './lib/custom-model.js';
 import { WEIGHT_QUANTS, KV_QUANTS, resolveQuant, resolveKv, DEFAULT_KV } from './lib/quant.js';
 import { HARDWARE_GROUPS, resolveHardware } from './lib/hardware.js';
 import { serveReport } from './lib/serve.js';
 import { GB } from './lib/calc.js';
-import { gb, tps, usd, commas, parseTokens, formatTokens, clampNum, params } from './lib/format.js';
+import { gb, tps, usd, commas, parseTokens, formatTokens, clampNum, params, markInvalidTokenInputs } from './lib/format.js';
 
 /**
  * Batch throughput calculator.
@@ -25,7 +26,7 @@ initBackground();
 
 fillSelect('#model', MODEL_GROUPS.map((g) => ({ group: g.group, items: g.models })), (m) => ({
 	value: m.id,
-	label: m.generic ? m.name : `${m.name} · ${params(m.params)}`,
+	label: m.generic || m.custom ? m.name : `${m.name} · ${params(m.params)}`,
 }));
 fillSelect(
 	'#quant',
@@ -49,8 +50,14 @@ hwEl.addEventListener('change', () => {
 	vramEl.value = String(resolveHardware(hwEl.value, DEFAULT_HW_SERVE).vram);
 });
 
+// Injects the custom-architecture fields plus the hidden #cm input that
+// carries them as one query parameter. Must run before UrlState so the binding
+// below finds #cm in the DOM.
+const custom = mountCustomFields('#model');
+
 const state = new UrlState([
-	{ key: 'p', el: '#model', default: DEFAULT_MODEL_SERVE, decode: (v) => resolveModel(v).id },
+	{ key: 'p', el: '#model', default: DEFAULT_MODEL_SERVE, decode: (v) => (v === CUSTOM_ID ? CUSTOM_ID : resolveModel(v).id) },
+	{ key: 'cm', el: '#cm', default: encodeCustom({}), decode: (v) => encodeCustom(decodeCustom(v)) },
 	{ key: 'd', el: '#quant', default: 'q4km', decode: (v) => resolveQuant(v).id },
 	{ key: 'ctx', el: '#ctx', default: 4096, decode: (v) => clampNum(parseTokens(v, 4096), { min: 128, max: 1048576, fallback: 4096 }), encode: formatTokens },
 	{ key: 'kv', el: '#kv', default: DEFAULT_KV, decode: (v) => resolveKv(v).id },
@@ -65,7 +72,7 @@ const state = new UrlState([
 function inputs() {
 	const v = state.values();
 	return {
-		model: resolveModel(v.p),
+		model: resolveWithCustom(resolveModel, v.p, v.cm),
 		quant: resolveQuant(v.d),
 		kv: resolveKv(v.kv),
 		ctx: v.ctx,
@@ -79,6 +86,9 @@ function inputs() {
 function render() {
 	const o = inputs();
 	const r = serveReport(o);
+
+	// The custom fields only exist when the custom entry is selected.
+	custom.container.hidden = state.read('p') !== CUSTOM_ID;
 
 	setText('#quant-bpw', `${o.quant.bpw} bpw`);
 
@@ -248,5 +258,10 @@ function renderLadder(o, r) {
 // after they are initialised. See the same note in vram.js.
 state.onChange(render);
 state.hydrate();
+// Visible custom fields are populated from the URL here and on history
+// navigation only — never on every render, or editing one fights the keyboard.
+custom.sync(decodeCustom(state.read('cm')));
+window.addEventListener('popstate', () => custom.sync(decodeCustom(state.read('cm'))));
 initShareButton('#share', state);
+markInvalidTokenInputs(['#ctx', '#cm-maxCtx']);
 render();

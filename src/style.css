@@ -530,6 +530,40 @@ input:focus {
 	background: rgba(255, 255, 255, 0.08);
 }
 
+/* Custom-model fieldset. Injected by src/lib/custom-model.js, so it is only
+   in the DOM on pages with a model select — and only visible when the custom
+   entry is chosen. Inset and rule-marked so it reads as a sub-panel of the
+   model field rather than as more top-level controls. */
+.custom-model {
+	margin: -0.5rem 0 1rem;
+	padding-left: 0.85rem;
+	border-left: 2px solid rgba(255, 255, 255, 0.14);
+}
+
+.custom-model .field-row {
+	gap: 0.5rem;
+}
+
+.custom-model .field {
+	margin-bottom: 0.6rem;
+}
+
+.custom-model .field-label {
+	font-size: 0.74rem;
+}
+
+.custom-model .field-hint {
+	font-size: 0.62rem;
+}
+
+/* A value the parser could not read. Marked rather than silently swapped for
+   the default: a field reading "8k128k" while the numbers describe 8k is the
+   kind of thing that quietly destroys trust in a calculator. */
+input.is-invalid {
+	border-color: rgba(245, 158, 11, 0.65);
+	background: rgba(245, 158, 11, 0.08);
+}
+
 /* Segmented radio group, used for things with two or three fixed choices
    where a dropdown would hide the options that matter. */
 .segmented {

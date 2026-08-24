@@ -2,13 +2,14 @@ import './style.css';
 import { initBackground, fillSelect, fillFlatSelect, setText, setHtml, escapeHtml } from './lib/page.js';
 import { UrlState, initShareButton } from './lib/urlstate.js';
 import { MODEL_GROUPS, resolveModel } from './lib/models.js';
+import { CUSTOM_ID, mountCustomFields, decodeCustom, encodeCustom, resolveWithCustom } from './lib/custom-model.js';
 import { WEIGHT_QUANTS, QUANTS, KV_MAP } from './lib/quant.js';
 import { resolveHardware } from './lib/hardware.js';
 import { report } from './lib/calc.js';
 import {
 	PPL_REFERENCE, FINDINGS, MODERN_PENALTY, referenceRow, RECOMMENDATION_ORDER,
 } from './lib/quality.js';
-import { gb, parseTokens, formatTokens, clampNum, params } from './lib/format.js';
+import { gb, parseTokens, formatTokens, clampNum, params, markInvalidTokenInputs } from './lib/format.js';
 
 /**
  * Quantisation quality.
@@ -32,12 +33,18 @@ fillFlatSelect('#family', Object.entries(PPL_REFERENCE), ([id, f]) => ({
 }));
 fillSelect('#model', MODEL_GROUPS.map((g) => ({ group: g.group, items: g.models })), (m) => ({
 	value: m.id,
-	label: m.generic ? m.name : `${m.name} · ${params(m.params)}`,
+	label: m.generic || m.custom ? m.name : `${m.name} · ${params(m.params)}`,
 }));
+
+// Injects the custom-architecture fields plus the hidden #cm input that
+// carries them as one query parameter. Must run before UrlState so the binding
+// below finds #cm in the DOM.
+const custom = mountCustomFields('#model');
 
 const state = new UrlState([
 	{ key: 'f', el: '#family', default: DEFAULT_FAMILY, decode: (v) => (PPL_REFERENCE[v] ? v : DEFAULT_FAMILY) },
-	{ key: 'p', el: '#model', default: DEFAULT_MODEL_QUANT, decode: (v) => resolveModel(v).id },
+	{ key: 'p', el: '#model', default: DEFAULT_MODEL_QUANT, decode: (v) => (v === CUSTOM_ID ? CUSTOM_ID : resolveModel(v).id) },
+	{ key: 'cm', el: '#cm', default: encodeCustom({}), decode: (v) => encodeCustom(decodeCustom(v)) },
 	{ key: 'ctx', el: '#ctx', default: 8192, decode: (v) => clampNum(parseTokens(v, 8192), { min: 128, max: 1048576, fallback: 8192 }), encode: formatTokens },
 	{ key: 'vram', el: '#vram', default: 24, decode: (v) => clampNum(v, { min: 1, max: 2048, fallback: 24 }) },
 ]);
@@ -47,7 +54,10 @@ const state = new UrlState([
 function render() {
 	const v = state.values();
 	const family = PPL_REFERENCE[v.f];
-	const model = resolveModel(v.p);
+	const model = resolveWithCustom(resolveModel, v.p, v.cm);
+
+	// The custom fields only exist when the custom entry is selected.
+	custom.container.hidden = state.read('p') !== CUSTOM_ID;
 
 	renderLadder(family);
 	renderFit(model, v.ctx, v.vram, family);
@@ -220,5 +230,10 @@ function renderFindings() {
 
 state.onChange(render);
 state.hydrate();
+// Visible custom fields are populated from the URL here and on history
+// navigation only — never on every render, or editing one fights the keyboard.
+custom.sync(decodeCustom(state.read('cm')));
+window.addEventListener('popstate', () => custom.sync(decodeCustom(state.read('cm'))));
 initShareButton('#share', state);
+markInvalidTokenInputs(['#ctx', '#cm-maxCtx']);
 render();

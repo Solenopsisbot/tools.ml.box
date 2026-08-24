@@ -71,6 +71,7 @@ tools.ml.box/
         ├── train.js          # training memory + time + cost maths
         ├── quality.js        # MEASURED perplexity data — see §4.4
         ├── providers.js      # hosted API pricing + self-host comparison
+        ├── custom-model.js   # user-defined architectures — see section 4.6
         ├── tools.js          # tool registry (index page + nav)
         ├── urlstate.js       # form <-> query-string binding
         ├── format.js         # display & parsing helpers
@@ -187,7 +188,10 @@ move the answer by factors of 5–10, not percentages:
   memory.
 
 When adding a model, take the numbers from the actual config, not from a blog
-post. `inter` is only used for LoRA parameter counting.
+post. `inter` is only used for LoRA parameter counting. If you cannot find a
+real config, do not add the model — that is what the custom entry in §4.5 is
+for. `approx: true` is the narrow exception: parameter counts solid, attention
+shape reconstructed, and the UI warns the reader.
 
 ### 4.2 Calibration reference points
 `src/lib/calc.js` is tuned so these land within ~15% of published llama.cpp /
@@ -259,7 +263,36 @@ Different rules apply to this file than to the rest of the site.
   across every level on one harness. Stitching newer piecemeal measurements
   together would produce a table that looks authoritative and is not.
 
-### 4.5 `src/lib/providers.js` will go stale
+### 4.5 Custom models: `src/lib/custom-model.js`
+
+Presets only hold architectures whose shape came off a published config.
+Everything else goes through the custom entry rather than being guessed at in
+`models.js` — that is the whole reason it exists, so **resist adding a model
+you had to reconstruct**. If you must, set `approx: true` and the UI will say
+so.
+
+Three invariants:
+
+- **`FIELDS` order is positional and append-only.** The spec rides in one query
+  parameter as `cm=8,8,32,4096,8,128,14336,128k`. Reordering or removing an
+  entry silently decodes every existing link into a different architecture.
+- **Eight visible inputs, one hidden `#cm`.** UrlState binds to the hidden
+  input; the visible fields write into it. Eight separate query keys would make
+  the URL unreadable and burn eight names out of a public namespace.
+- **`sync()` runs on hydrate and popstate only, never on every render.**
+  Writing sanitised values back mid-edit makes the field fight the keyboard —
+  clear it to retype and it snaps to the minimum under your cursor.
+
+`active` follows `params` until someone edits it directly. Without that, typing
+70 into params leaves active at its default of 8 and the tool reports a 70B
+model decoding at 8B speeds — a wrong answer that looks entirely reasonable.
+
+A custom entry is always modelled as plain GQA: `swa` and `mla` are forced
+null. Both change the cache by multiples and neither is expressible in eight
+number fields without inviting a wrong answer, so the custom path is
+deliberately the pessimistic one and the UI says so.
+
+### 4.6 `src/lib/providers.js` will go stale
 
 There is no price feed — this is a static site. Every row carries a
 `confidence` (`published` vs `approximate`) that the UI renders, and
@@ -426,6 +459,7 @@ Before declaring a change complete:
 5. If you touched `calc.js`, `serve.js` or `train.js`, re-check the calibration
    table in §4.2
 6. If you touched `quality.js`, re-read §4.4 — that file has stricter rules
-7. If you touched the palette, re-run the colour validator
-8. If you added or renamed a tool, `npm run nav` and check all five edits in §3.2
-9. Git tree clean and pushed
+7. If you touched `custom-model.js`, re-read §4.5 — `FIELDS` is append-only
+8. If you touched the palette, re-run the colour validator
+9. If you added or renamed a tool, `npm run nav` and check all five edits in §3.2
+10. Git tree clean and pushed

@@ -2,6 +2,7 @@ import './style.css';
 import { initBackground, fillSelect, fillFlatSelect, setText, setHtml, escapeHtml } from './lib/page.js';
 import { UrlState, initShareButton } from './lib/urlstate.js';
 import { MODEL_GROUPS, resolveModel } from './lib/models.js';
+import { CUSTOM_ID, mountCustomFields, decodeCustom, encodeCustom, resolveWithCustom } from './lib/custom-model.js';
 import { WEIGHT_QUANTS, resolveQuant, KV_MAP } from './lib/quant.js';
 import { HARDWARE_GROUPS, HARDWARE, resolveHardware } from './lib/hardware.js';
 import { serveReport } from './lib/serve.js';
@@ -9,7 +10,7 @@ import { report } from './lib/calc.js';
 import {
 	PROVIDERS, PROVIDER_MODELS, resolveProvider, apiCost, selfHostCost, PRICES_AS_OF, DEFAULT_PROVIDER,
 } from './lib/providers.js';
-import { usd, commas, tps, duration, parseTokens, clampNum, params, formatTokens } from './lib/format.js';
+import { usd, commas, tps, duration, parseTokens, clampNum, params, formatTokens, markInvalidTokenInputs } from './lib/format.js';
 
 /**
  * API cost and the self-hosting crossover.
@@ -33,7 +34,7 @@ fillSelect('#provider', PROVIDERS.map((g) => ({ group: g.group, items: g.models 
 }));
 fillSelect('#model', MODEL_GROUPS.map((g) => ({ group: g.group, items: g.models })), (m) => ({
 	value: m.id,
-	label: m.generic ? m.name : `${m.name} · ${params(m.params)}`,
+	label: m.generic || m.custom ? m.name : `${m.name} · ${params(m.params)}`,
 }));
 fillFlatSelect('#quant', WEIGHT_QUANTS.filter((q) => q.id !== 'fp32'), (q) => ({ value: q.id, label: q.name }));
 // Only rentable cards: a self-hosting cost comparison against a card with no
@@ -44,6 +45,11 @@ fillSelect(
 	(h) => ({ value: h.id, label: `${h.name} · $${h.rentUsd.toFixed(2)}/h` }),
 );
 
+// Injects the custom-architecture fields plus the hidden #cm input that
+// carries them as one query parameter. Must run before UrlState so the binding
+// below finds #cm in the DOM.
+const custom = mountCustomFields('#model');
+
 const state = new UrlState([
 	{ key: 'api', el: '#provider', default: DEFAULT_PROVIDER, decode: (v) => resolveProvider(v).id },
 	{ key: 'req', el: '#requests', default: 100000, decode: (v) => Math.round(clampNum(parseTokens(v, 100000), { min: 1, max: 1e10, fallback: 100000 })), encode: (v) => commas(v) },
@@ -51,7 +57,8 @@ const state = new UrlState([
 	{ key: 'out', el: '#outtok', default: 512, decode: (v) => Math.round(clampNum(parseTokens(v, 512), { min: 1, max: 2e6, fallback: 512 })), encode: formatTokens },
 	{ key: 'c', el: '#cached', default: 0, decode: (v) => Math.round(clampNum(v, { min: 0, max: 95, fallback: 0 })) },
 	{ key: 'b', el: 'tier', radio: true, default: false, decode: (v) => v === '1', encode: (v) => (v ? '1' : '0') },
-	{ key: 'p', el: '#model', default: DEFAULT_SELF_MODEL, decode: (v) => resolveModel(v).id },
+	{ key: 'p', el: '#model', default: DEFAULT_SELF_MODEL, decode: (v) => (v === CUSTOM_ID ? CUSTOM_ID : resolveModel(v).id) },
+	{ key: 'cm', el: '#cm', default: encodeCustom({}), decode: (v) => encodeCustom(decodeCustom(v)) },
 	{ key: 'd', el: '#quant', default: 'q4km', decode: (v) => resolveQuant(v).id },
 	{ key: 'hw', el: '#hw', default: DEFAULT_SELF_HW, decode: (v) => {
 		const h = resolveHardware(v, DEFAULT_SELF_HW);
@@ -72,7 +79,7 @@ function inputs() {
 		outTokens: v.out,
 		cachedFrac: v.c / 100,
 		batchTier: v.b,
-		model: resolveModel(v.p),
+		model: resolveWithCustom(resolveModel, v.p, v.cm),
 		quant: resolveQuant(v.d),
 		hardware: resolveHardware(v.hw, DEFAULT_SELF_HW),
 	};
@@ -130,6 +137,9 @@ function render() {
 				outputTokens: api.outputTokens,
 			})
 		: null;
+
+	// The custom fields only exist when the custom entry is selected.
+	custom.container.hidden = state.read('p') !== CUSTOM_ID;
 
 	setText('#cached-hint', `${o.cachedFrac * 100}%`);
 
@@ -302,5 +312,10 @@ function renderSelf(o, api, self, th) {
 
 state.onChange(render);
 state.hydrate();
+// Visible custom fields are populated from the URL here and on history
+// navigation only — never on every render, or editing one fights the keyboard.
+custom.sync(decodeCustom(state.read('cm')));
+window.addEventListener('popstate', () => custom.sync(decodeCustom(state.read('cm'))));
 initShareButton('#share', state);
+markInvalidTokenInputs(['#requests', '#intok', '#outtok', '#cm-maxCtx']);
 render();

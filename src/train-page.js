@@ -4,10 +4,11 @@ import {
 } from './lib/page.js';
 import { UrlState, initShareButton } from './lib/urlstate.js';
 import { MODEL_GROUPS, resolveModel, DEFAULT_MODEL } from './lib/models.js';
+import { CUSTOM_ID, mountCustomFields, decodeCustom, encodeCustom, resolveWithCustom } from './lib/custom-model.js';
 import { HARDWARE_GROUPS, HARDWARE, resolveHardware } from './lib/hardware.js';
 import { trainReport, maxBatch, METHODS, TARGETS, OPTIMIZERS, OPT_MAP } from './lib/train.js';
 import { GB } from './lib/calc.js';
-import { gb, duration, usd, commas, tps, parseTokens, formatTokens, clampNum, params } from './lib/format.js';
+import { gb, duration, usd, commas, tps, parseTokens, formatTokens, clampNum, params, markInvalidTokenInputs } from './lib/format.js';
 
 /**
  * Finetune cost calculator.
@@ -27,7 +28,7 @@ initBackground();
 
 fillSelect('#model', MODEL_GROUPS.map((g) => ({ group: g.group, items: g.models })), (m) => ({
 	value: m.id,
-	label: m.generic ? m.name : `${m.name} · ${params(m.params)}`,
+	label: m.generic || m.custom ? m.name : `${m.name} · ${params(m.params)}`,
 }));
 fillFlatSelect('#method', METHODS, (m) => ({ value: m.id, label: m.name }));
 fillFlatSelect('#targets', TARGETS, (t) => ({ value: t.id, label: t.name }));
@@ -49,8 +50,14 @@ hwEl.addEventListener('change', () => {
 const boolDecode = (v) => v === '1' || v === 'true';
 const boolEncode = (v) => (v ? '1' : '0');
 
+// Injects the custom-architecture fields plus the hidden #cm input that
+// carries them as one query parameter. Must run before UrlState so the binding
+// below finds #cm in the DOM.
+const custom = mountCustomFields('#model');
+
 const state = new UrlState([
-	{ key: 'p', el: '#model', default: DEFAULT_MODEL, decode: (v) => resolveModel(v).id },
+	{ key: 'p', el: '#model', default: DEFAULT_MODEL, decode: (v) => (v === CUSTOM_ID ? CUSTOM_ID : resolveModel(v).id) },
+	{ key: 'cm', el: '#cm', default: encodeCustom({}), decode: (v) => encodeCustom(decodeCustom(v)) },
 	{ key: 'm', el: '#method', default: 'qlora', decode: (v) => (METHODS.some((x) => x.id === v) ? v : 'qlora') },
 	{ key: 'r', el: '#rank', default: 16, decode: (v) => Math.round(clampNum(v, { min: 1, max: 512, fallback: 16 })) },
 	{ key: 'tg', el: '#targets', default: 'all', decode: (v) => (v === 'attn' ? 'attn' : 'all') },
@@ -77,7 +84,7 @@ function inputs() {
 	const v = state.values();
 	const hardware = resolveHardware(v.hw, DEFAULT_HW_TRAIN);
 	return {
-		model: resolveModel(v.p),
+		model: resolveWithCustom(resolveModel, v.p, v.cm),
 		method: v.m,
 		rank: v.r,
 		targets: v.tg,
@@ -101,6 +108,9 @@ function inputs() {
 function render() {
 	const o = inputs();
 	const r = trainReport(o);
+
+	// The custom fields only exist when the custom entry is selected.
+	custom.container.hidden = state.read('p') !== CUSTOM_ID;
 
 	// LoRA rank and target modules mean nothing for a full finetune.
 	document.querySelector('#lora-fields').hidden = o.method === 'full';
@@ -373,6 +383,8 @@ function renderHardwareTable(o) {
 function renderNotes(o, r) {
 	const notes = [];
 	notes.push(METHODS.find((m) => m.id === o.method).note);
+	if (o.model.approx) notes.push('This model\u2019s attention shape is reconstructed rather than published; the LoRA parameter count follows from it and is indicative.');
+	if (o.model.custom) notes.push('LoRA parameters are counted from the projection shapes you entered, so the MLP intermediate size matters — it drives most of the adapter.');
 	if (o.method !== 'full') notes.push(TARGETS.find((t) => t.id === o.targets).note);
 	notes.push(OPT_MAP.get(o.optimizer).note);
 
@@ -409,5 +421,10 @@ function renderNotes(o, r) {
  */
 state.onChange(render);
 state.hydrate();
+// Visible custom fields are populated from the URL here and on history
+// navigation only — never on every render, or editing one fights the keyboard.
+custom.sync(decodeCustom(state.read('cm')));
+window.addEventListener('popstate', () => custom.sync(decodeCustom(state.read('cm'))));
 initShareButton('#share', state);
+markInvalidTokenInputs(['#rows', '#seq', '#cm-maxCtx']);
 render();

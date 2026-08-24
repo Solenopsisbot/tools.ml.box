@@ -31,11 +31,30 @@
  *                 layer of `mla` bytes-worth of elements, not 2*kvHeads*headDim.
  *   nativeQuant   Model ships pre-quantized at this scheme; anything higher
  *                 precision is a lie (gpt-oss is MXFP4 from the factory).
+ *   approx        Set when the parameter counts are solid but the attention
+ *                 shape is reconstructed rather than read off a published
+ *                 config. The UI says so. Prefer leaving a model out over
+ *                 guessing silently — that is what the custom entry is for.
  *   note          Shown in the UI when this model is selected.
  */
 
 /** @type {Array<{group: string, models: object[]}>} */
 export const MODEL_GROUPS = [
+	{
+		group: 'Custom',
+		models: [
+			// Placeholder shape only. When `?p=custom` is selected the real
+			// numbers come from the `cm` parameter via
+			// src/lib/custom-model.js — this entry exists so the id resolves,
+			// the option appears in every model select, and nothing NaNs if
+			// something reads the model before the spec is decoded.
+			m({
+				id: 'custom', name: 'Custom model…', custom: true,
+				params: 8, layers: 32, hidden: 4096, heads: 32, kvHeads: 8, headDim: 128,
+				inter: 14336, maxCtx: 131072,
+			}),
+		],
+	},
 	{
 		group: 'Generic (parameter count only)',
 		models: [
@@ -61,6 +80,18 @@ export const MODEL_GROUPS = [
 			m({ id: 'llama-3.1-8b', name: 'Llama 3.1 8B', params: 8.03, layers: 32, hidden: 4096, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 14336 }),
 			m({ id: 'llama-3.3-70b', name: 'Llama 3.3 70B', params: 70.6, layers: 80, hidden: 8192, heads: 64, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 28672 }),
 			m({ id: 'llama-3.1-405b', name: 'Llama 3.1 405B', params: 405.9, layers: 126, hidden: 16384, heads: 128, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 53248 }),
+			m({
+				id: 'llama-4-scout', name: 'Llama 4 Scout', params: 109, active: 17,
+				layers: 48, hidden: 5120, heads: 40, kvHeads: 8, headDim: 128, inter: 8192,
+				maxCtx: 10485760, swa: { window: 8192, every: 4 },
+				note: 'MoE: 16 experts plus a shared expert, 17B active. Interleaved attention — three chunked-local layers capped at 8192 tokens for every one global NoPE layer, which is what makes the advertised 10M window affordable at all.',
+			}),
+			m({
+				id: 'llama-4-maverick', name: 'Llama 4 Maverick', params: 400, active: 17,
+				layers: 48, hidden: 5120, heads: 40, kvHeads: 8, headDim: 128, inter: 8192,
+				maxCtx: 1048576, swa: { window: 8192, every: 4 },
+				note: 'MoE: 128 experts, 17B active. Same attention layout as Scout, so the KV cache is identical — the extra 290B of weights is all expert capacity.',
+			}),
 		],
 	},
 	{
@@ -68,9 +99,13 @@ export const MODEL_GROUPS = [
 		models: [
 			m({ id: 'qwen2.5-0.5b', name: 'Qwen2.5 0.5B', params: 0.49, layers: 24, hidden: 896, heads: 14, kvHeads: 2, headDim: 64, maxCtx: 32768, inter: 4864 }),
 			m({ id: 'qwen2.5-1.5b', name: 'Qwen2.5 1.5B', params: 1.54, layers: 28, hidden: 1536, heads: 12, kvHeads: 2, headDim: 128, maxCtx: 32768, inter: 8960 }),
+			m({ id: 'qwen2.5-3b', name: 'Qwen2.5 3B', params: 3.09, layers: 36, hidden: 2048, heads: 16, kvHeads: 2, headDim: 128, maxCtx: 32768, inter: 11008 }),
 			m({ id: 'qwen2.5-7b', name: 'Qwen2.5 7B', params: 7.62, layers: 28, hidden: 3584, heads: 28, kvHeads: 4, headDim: 128, maxCtx: 32768, inter: 18944 }),
+			m({ id: 'qwen2.5-14b', name: 'Qwen2.5 14B', params: 14.8, layers: 48, hidden: 5120, heads: 40, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 13824 }),
 			m({ id: 'qwen2.5-32b', name: 'Qwen2.5 32B', params: 32.8, layers: 64, hidden: 5120, heads: 40, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 27648 }),
 			m({ id: 'qwen2.5-72b', name: 'Qwen2.5 72B', params: 72.7, layers: 80, hidden: 8192, heads: 64, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 29568 }),
+			m({ id: 'qwen3-0.6b', name: 'Qwen3 0.6B', params: 0.75, layers: 28, hidden: 1024, heads: 16, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 3072 }),
+			m({ id: 'qwen3-1.7b', name: 'Qwen3 1.7B', params: 2.03, layers: 28, hidden: 2048, heads: 16, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 6144 }),
 			m({ id: 'qwen3-4b', name: 'Qwen3 4B', params: 4.02, layers: 36, hidden: 2560, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 9728 }),
 			m({ id: 'qwen3-8b', name: 'Qwen3 8B', params: 8.19, layers: 36, hidden: 4096, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 12288 }),
 			m({ id: 'qwen3-14b', name: 'Qwen3 14B', params: 14.8, layers: 40, hidden: 5120, heads: 40, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 17408 }),
@@ -85,11 +120,17 @@ export const MODEL_GROUPS = [
 				layers: 94, hidden: 4096, heads: 64, kvHeads: 4, headDim: 128, maxCtx: 32768, inter: 1536,
 				note: 'MoE: 128 experts, 8 active.',
 			}),
+			m({
+				id: 'qwen3-coder-480b', name: 'Qwen3-Coder 480B-A35B', params: 480, active: 35,
+				layers: 62, hidden: 6144, heads: 64, kvHeads: 4, headDim: 128, maxCtx: 262144, inter: 2560,
+				note: 'MoE: 160 experts, 8 active. Only 4 KV heads across 62 layers, so the cache stays modest even at 256k — the memory problem here is entirely the 480B of weights.',
+			}),
 		],
 	},
 	{
 		group: 'Mistral',
 		models: [
+			m({ id: 'ministral-8b', name: 'Ministral 8B', params: 8.02, layers: 36, hidden: 4096, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 12288 }),
 			m({ id: 'mistral-7b', name: 'Mistral 7B v0.3', params: 7.25, layers: 32, hidden: 4096, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 14336 }),
 			m({ id: 'mistral-nemo-12b', name: 'Mistral Nemo 12B', params: 12.2, layers: 40, hidden: 5120, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 14336 }),
 			m({ id: 'mistral-small-24b', name: 'Mistral Small 24B', params: 23.6, layers: 40, hidden: 5120, heads: 32, kvHeads: 8, headDim: 128, maxCtx: 32768, inter: 32768 }),
@@ -99,6 +140,12 @@ export const MODEL_GROUPS = [
 	{
 		group: 'Gemma',
 		models: [
+			m({
+				id: 'gemma-3-1b', name: 'Gemma 3 1B', params: 1.0, layers: 26, hidden: 1152,
+				heads: 4, kvHeads: 1, headDim: 256, maxCtx: 32768, inter: 6912,
+				swa: { window: 512, every: 6 },
+				note: 'One KV head and a 512-token window on five of every six layers. The cache is almost free — this is the model to reach for when memory is the binding constraint.',
+			}),
 			m({
 				id: 'gemma-3-4b', name: 'Gemma 3 4B', params: 4.3, layers: 34, hidden: 2560,
 				heads: 8, kvHeads: 4, headDim: 256, maxCtx: 131072, inter: 10240, swa: { window: 1024, every: 6 },
@@ -111,6 +158,29 @@ export const MODEL_GROUPS = [
 			m({
 				id: 'gemma-3-27b', name: 'Gemma 3 27B', params: 27.4, layers: 62, hidden: 5376,
 				heads: 32, kvHeads: 16, headDim: 128, maxCtx: 131072, inter: 21504, swa: { window: 1024, every: 6 },
+			}),
+		],
+	},
+	{
+		group: 'Phi',
+		models: [
+			m({ id: 'phi-4-mini', name: 'Phi-4-mini 3.8B', params: 3.84, layers: 32, hidden: 3072, heads: 24, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 8192 }),
+			m({ id: 'phi-4', name: 'Phi-4 14B', params: 14.7, layers: 40, hidden: 5120, heads: 40, kvHeads: 10, headDim: 128, maxCtx: 16384, inter: 17920 }),
+		],
+	},
+	{
+		group: 'Dense, other',
+		models: [
+			m({
+				id: 'command-a', name: 'Command A 111B', params: 111, layers: 64, hidden: 12288,
+				heads: 96, kvHeads: 8, headDim: 128, maxCtx: 262144, inter: 36864,
+				swa: { window: 4096, every: 4 }, approx: true,
+				note: 'Interleaved sliding-window attention: three local layers capped at 4096 tokens for every full-attention layer.',
+			}),
+			m({
+				id: 'olmo-2-32b', name: 'OLMo 2 32B', params: 32.2, layers: 64, hidden: 5120,
+				heads: 40, kvHeads: 40, headDim: 128, maxCtx: 4096, inter: 27648,
+				note: 'Full multi-head attention — no grouped-query reduction at all, so the KV cache is 5x a comparable GQA model. Fully open training data, which is the point of it.',
 			}),
 		],
 	},
@@ -130,10 +200,32 @@ export const MODEL_GROUPS = [
 				note: 'Ships natively in MXFP4. Fits an 80GB card whole; the 5.1B active params make it decode fast.',
 			}),
 			m({
+				id: 'deepseek-v2-lite', name: 'DeepSeek V2-Lite 16B', params: 15.7, active: 2.4,
+				layers: 27, hidden: 2048, heads: 16, kvHeads: 16, headDim: 128, maxCtx: 32768, inter: 1408,
+				mla: 576,
+				note: 'MLA on a model small enough to run anywhere. 2.4B active parameters make it very fast; 16B of weights still have to be resident.',
+			}),
+			m({
 				id: 'deepseek-v3', name: 'DeepSeek V3 / R1 671B', params: 671, active: 37,
 				layers: 61, hidden: 7168, heads: 128, kvHeads: 128, headDim: 128, maxCtx: 131072, inter: 2048,
 				mla: 576,
 				note: 'Multi-head latent attention compresses KV to a single 576-value latent per token per layer — the cache is ~10x smaller than the shape suggests.',
+			}),
+			m({
+				id: 'kimi-k2', name: 'Kimi K2 1T-A32B', params: 1000, active: 32,
+				layers: 61, hidden: 7168, heads: 64, kvHeads: 64, headDim: 128, maxCtx: 131072, inter: 2048,
+				mla: 576,
+				note: 'A trillion parameters with 32B active, MLA for the cache. The weights are the entire problem: even at 2-bit this needs ~260 GB, so it is a multi-GPU-node or big-unified-memory model only.',
+			}),
+			m({
+				id: 'glm-4.5-air', name: 'GLM-4.5-Air 106B-A12B', params: 106, active: 12,
+				layers: 46, hidden: 4096, heads: 96, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 1408,
+				approx: true,
+			}),
+			m({
+				id: 'glm-4.5', name: 'GLM-4.5 355B-A32B', params: 355, active: 32,
+				layers: 92, hidden: 5120, heads: 96, kvHeads: 8, headDim: 128, maxCtx: 131072, inter: 1536,
+				approx: true,
 			}),
 		],
 	},
@@ -166,6 +258,8 @@ function m(cfg) {
 		mla: null,
 		nativeQuant: null,
 		inter: Math.round(cfg.hidden * 3.5),
+		approx: false,
+		custom: false,
 		note: '',
 		generic: false,
 		...cfg,

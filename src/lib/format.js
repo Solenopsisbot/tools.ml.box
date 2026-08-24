@@ -21,16 +21,46 @@ export function gbNum(bytes) {
  * Token counts round-trip through the URL in the form people actually write:
  * `32k`, `128k`, `1m`. `k` is 1024, because that is what everyone means when
  * they say a model has 128k context.
+ *
+ * Returns null on unparseable input so a caller can tell the difference
+ * between "the user typed 8k" and "the user typed nonsense and we are about to
+ * silently show them the 8k answer". Use `parseTokens` when you just want a
+ * number, `tryParseTokens` when you want to mark the field.
  */
-export function parseTokens(value, fallback = 8192) {
-	if (value === null || value === undefined || value === '') return fallback;
+export function tryParseTokens(value) {
+	if (value === null || value === undefined || String(value).trim() === '') return null;
 	const s = String(value).trim().toLowerCase().replace(/[,_\s]/g, '');
 	const match = s.match(/^([0-9]*\.?[0-9]+)([km])?$/);
-	if (!match) return fallback;
+	if (!match) return null;
 	const n = Number.parseFloat(match[1]);
-	if (!Number.isFinite(n) || n <= 0) return fallback;
+	if (!Number.isFinite(n) || n <= 0) return null;
 	const scale = match[2] === 'm' ? 1024 * 1024 : match[2] === 'k' ? 1024 : 1;
 	return Math.round(n * scale);
+}
+
+export function parseTokens(value, fallback = 8192) {
+	return tryParseTokens(value) ?? fallback;
+}
+
+/**
+ * Flag text inputs whose contents the parser rejected.
+ *
+ * Purely visual — the calculation still runs on the fallback, because a
+ * calculator that blanks itself on a typo is worse than one that shows a
+ * marked field. Wire it once per page over the token-shaped inputs.
+ */
+export function markInvalidTokenInputs(selectors) {
+	for (const sel of selectors) {
+		const el = document.querySelector(sel);
+		if (!el) continue;
+		const check = () => {
+			const raw = el.value.trim();
+			el.classList.toggle('is-invalid', raw !== '' && tryParseTokens(raw) === null);
+		};
+		el.addEventListener('input', check);
+		el.addEventListener('change', check);
+		check();
+	}
 }
 
 /** 32768 -> "32k". Falls back to plain digits when it is not a clean multiple. */

@@ -140,7 +140,11 @@ export class UrlState {
 			}
 			q.set(b.key, b.encode(value));
 		}
-		return q.toString();
+		// URLSearchParams percent-encodes commas, which turns a compact custom
+		// spec into `cm=70%2C70%2C80%2C...`. Commas are legal unencoded in a
+		// query value, and readable URLs are the whole point of this site, so
+		// put them back.
+		return q.toString().replace(/%2C/g, ',');
 	}
 
 	/** Absolute, shareable URL for the current form state. */

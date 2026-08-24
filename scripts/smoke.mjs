@@ -401,6 +401,96 @@ try {
 		await page.close();
 	}
 
+	/* ------------------------------------------------------ custom model -- */
+	console.log('\ncustom models');
+	{
+		const { page, errors } = await newPage(browser);
+
+		// One shared link must reproduce the same architecture on every page.
+		const link = '?p=custom&cm=70,70,80,8192,8,128,28672,128k';
+		for (const path of ['/vram', '/serve', '/train', '/quant', '/cost']) {
+			await page.goto(`${BASE}${path}${link}`, { waitUntil: 'networkidle0' });
+			await new Promise((r) => setTimeout(r, 400));
+			const st = await page.evaluate(() => ({
+				sel: document.querySelector('#model').value,
+				shown: getComputedStyle(document.querySelector('#custom-fields')).display !== 'none',
+				params: document.querySelector('#cm-params')?.value,
+				layers: document.querySelector('#cm-layers')?.value,
+				verdict: document.querySelector('#verdict-title')?.textContent ?? '',
+			}));
+			check(
+				`${path} restores a shared custom spec`,
+				st.sel === 'custom' && st.shown && st.params === '70' && st.layers === '80' && st.verdict.length > 3,
+				JSON.stringify(st),
+			);
+		}
+		check('no console errors across custom pages', errors.length === 0, errors.join(' | '));
+
+		// A custom spec matching a preset must land on the preset's numbers.
+		await page.goto(`${BASE}/vram?p=custom&cm=8.03,8.03,32,4096,8,128,14336,128k&ctx=8k`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 400));
+		const custom = await page.evaluate(() => document.querySelector('#stat-total').textContent);
+		await page.goto(`${BASE}/vram?p=llama-3.1-8b&ctx=8k`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 400));
+		const preset = await page.evaluate(() => document.querySelector('#stat-total').textContent);
+		check('custom spec reproduces the equivalent preset', custom === preset, `${custom} vs ${preset}`);
+
+		// Editing params must carry `active` with it, or a dense model silently
+		// reports MoE decode speed.
+		await page.goto(`${BASE}/vram?p=custom`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 300));
+		await page.focus('#cm-params');
+		await page.evaluate(() => document.querySelector('#cm-params').select());
+		await page.keyboard.type('70');
+		await new Promise((r) => setTimeout(r, 400));
+		const linked = await page.evaluate(() => document.querySelector('#cm-active').value);
+		check('active follows params until edited', linked === '70', linked);
+		check('custom spec rides in one query param', page.url().includes('cm=70,70,'), page.url());
+
+		// The custom fieldset must be absent for a preset.
+		await page.goto(`${BASE}/vram?p=qwen3-32b`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 300));
+		const hiddenForPreset = await page.evaluate(
+			() => getComputedStyle(document.querySelector('#custom-fields')).display === 'none',
+		);
+		check('custom fields hidden for a preset', hiddenForPreset);
+
+		await page.close();
+	}
+
+	/* -------------------------------------------------- live URL updating -- */
+	console.log('\nlive URL state');
+	{
+		const { page } = await newPage(browser);
+		await page.goto(`${BASE}/vram`, { waitUntil: 'networkidle0' });
+		await new Promise((r) => setTimeout(r, 400));
+		check('a fresh load at defaults has a bare URL', !page.url().includes('?'), page.url());
+
+		await page.select('#model', 'qwen3-32b');
+		await new Promise((r) => setTimeout(r, 400));
+		check('select writes to the URL without pressing anything', page.url().includes('p=qwen3-32b'), page.url());
+
+		await page.focus('#ctx');
+		await page.evaluate(() => document.querySelector('#ctx').select());
+		await page.keyboard.type('64k');
+		await new Promise((r) => setTimeout(r, 400));
+		check('typing writes to the URL', page.url().includes('ctx=64k'), page.url());
+
+		// Unparseable text must be visibly marked, not silently swapped for the
+		// default while the numbers carry on as if nothing happened.
+		await page.focus('#ctx');
+		await page.evaluate(() => {
+			const el = document.querySelector('#ctx');
+			el.setSelectionRange(el.value.length, el.value.length);
+		});
+		await page.keyboard.type('zzz');
+		await new Promise((r) => setTimeout(r, 400));
+		const marked = await page.evaluate(() => document.querySelector('#ctx').classList.contains('is-invalid'));
+		check('unparseable input is marked invalid', marked);
+
+		await page.close();
+	}
+
 	/* ------------------------------------------------- robustness & a11y -- */
 	console.log('\nrobustness');
 	{

@@ -4,12 +4,13 @@ import {
 } from './lib/page.js';
 import { UrlState, initShareButton } from './lib/urlstate.js';
 import { MODEL_GROUPS, resolveModel, DEFAULT_MODEL } from './lib/models.js';
+import { CUSTOM_ID, mountCustomFields, decodeCustom, encodeCustom, resolveWithCustom } from './lib/custom-model.js';
 import {
 	WEIGHT_QUANTS, KV_QUANTS, resolveQuant, resolveKv, DEFAULT_QUANT, DEFAULT_KV,
 } from './lib/quant.js';
 import { HARDWARE_GROUPS, RAM_SPEEDS, RAM_MAP, resolveHardware, DEFAULT_HW } from './lib/hardware.js';
 import { report, kvCacheBytes, GB } from './lib/calc.js';
-import { gb, tps, duration, commas, parseTokens, formatTokens, clampNum, params } from './lib/format.js';
+import { gb, tps, duration, commas, parseTokens, formatTokens, clampNum, params, markInvalidTokenInputs } from './lib/format.js';
 
 /**
  * VRAM & speed calculator.
@@ -34,7 +35,7 @@ initBackground();
 
 fillSelect('#model', MODEL_GROUPS.map((g) => ({ group: g.group, items: g.models })), (m) => ({
 	value: m.id,
-	label: m.generic ? m.name : `${m.name} · ${params(m.params)}${m.active !== m.params ? ` (${params(m.active)} active)` : ''}`,
+	label: m.generic || m.custom ? m.name : `${m.name} · ${params(m.params)}${m.active !== m.params ? ` (${params(m.active)} active)` : ''}`,
 }));
 
 fillSelect(
@@ -65,8 +66,14 @@ hwEl.addEventListener('change', () => {
 	vramEl.value = String(resolveHardware(hwEl.value).vram);
 });
 
+// Injects the custom-architecture fields plus the hidden #cm input that
+// carries them as one query parameter. Must run before UrlState so the binding
+// below finds #cm in the DOM.
+const custom = mountCustomFields('#model');
+
 const state = new UrlState([
-	{ key: 'p', el: '#model', default: DEFAULT_MODEL, decode: (v) => resolveModel(v).id },
+	{ key: 'p', el: '#model', default: DEFAULT_MODEL, decode: (v) => (v === CUSTOM_ID ? CUSTOM_ID : resolveModel(v).id) },
+	{ key: 'cm', el: '#cm', default: encodeCustom({}), decode: (v) => encodeCustom(decodeCustom(v)) },
 	{ key: 'd', el: '#quant', default: DEFAULT_QUANT, decode: (v) => resolveQuant(v).id },
 	{ key: 'ctx', el: '#ctx', default: 8192, decode: (v) => clampNum(parseTokens(v, 8192), { min: 128, max: 4194304, fallback: 8192 }), encode: formatTokens },
 	{ key: 'kv', el: '#kv', default: DEFAULT_KV, decode: (v) => resolveKv(v).id },
@@ -85,7 +92,7 @@ const state = new UrlState([
 function inputs() {
 	const v = state.values();
 	return {
-		model: resolveModel(v.p),
+		model: resolveWithCustom(resolveModel, v.p, v.cm),
 		quant: resolveQuant(v.d),
 		kv: resolveKv(v.kv),
 		ctx: v.ctx,
@@ -101,6 +108,9 @@ function inputs() {
 function render() {
 	const o = inputs();
 	const r = report(o);
+
+	// The custom fields only exist when the custom entry is selected.
+	custom.container.hidden = state.read('p') !== CUSTOM_ID;
 
 	// Multi-GPU split only means anything with more than one accelerator, and
 	// only on discrete GPUs — a Mac has one pool.
@@ -271,6 +281,16 @@ function renderBreakdown(o, r) {
 function renderArchNote(o, r) {
 	const notes = [];
 	if (o.model.note) notes.push(o.model.note);
+	if (o.model.approx) {
+		notes.push(
+			'Parameter counts for this model are solid, but its attention shape here is reconstructed rather than read off a published config — treat the KV cache figure as indicative and check against the real config.json before committing hardware to it.',
+		);
+	}
+	if (o.model.custom) {
+		notes.push(
+			'A custom entry is modelled as plain grouped-query attention. If the real architecture uses a sliding window or MLA the true cache is smaller — often by 5-10x — so this is the pessimistic end.',
+		);
+	}
 	if (o.hardware.note) notes.push(o.hardware.note);
 	if (o.quant.note) notes.push(`${o.quant.name}: ${o.quant.note}`);
 
@@ -370,5 +390,10 @@ function renderContextLadder(o) {
  */
 state.onChange(render);
 state.hydrate();
+// Visible custom fields are populated from the URL here and on history
+// navigation only — never on every render, or editing one fights the keyboard.
+custom.sync(decodeCustom(state.read('cm')));
+window.addEventListener('popstate', () => custom.sync(decodeCustom(state.read('cm'))));
 initShareButton('#share', state);
+markInvalidTokenInputs(['#ctx', '#cm-maxCtx']);
 render();
