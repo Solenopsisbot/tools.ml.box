@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>Finetune cost calculator — tools.ml.box</title>
+  <meta name="description" content="LoRA and QLoRA finetuning memory, wall-clock time and rental cost for a given model, dataset, sequence length and GPU. Calibrated against Unsloth's published figures.">
+  <link rel="canonical" href="https://tools.ml.box/train">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/train">
+  <meta property="og:title" content="Finetune cost calculator — tools.ml.box">
+  <meta property="og:description" content="LoRA and QLoRA memory, time and cost for a given model, dataset and GPU.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Finetune cost calculator — tools.ml.box">
+  <meta name="twitter:description" content="LoRA and QLoRA memory, time and cost for a given model, dataset and GPU.">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram">VRAM &amp; speed</a>
+        <a class="nav-link" href="/train" aria-current="page">Finetune cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">Training</p>
+        <h1 class="page-title">Finetune cost</h1>
+        <p class="page-lede">
+          What a LoRA or QLoRA run will need, how long it will take, and what it
+          will cost to rent the card. Memory is modelled term by term — including
+          the logits tensor, which is usually larger than the adapter and which
+          almost nobody budgets for.
+        </p>
+      </div>
+
+      <div class="tool-grid">
+
+        <!-- CONTROLS ------------------------------------------------------ -->
+        <form class="panel panel-pad controls" id="controls" autocomplete="off">
+          <h2 class="panel-title">Model &amp; method</h2>
+
+          <div class="field">
+            <label class="field-label" for="model">Model</label>
+            <select id="model"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="method">Method</label>
+            <select id="method"></select>
+          </div>
+
+          <div id="lora-fields">
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="rank">LoRA rank</label>
+                <input type="number" id="rank" min="1" max="512" step="1">
+              </div>
+              <div class="field">
+                <label class="field-label" for="targets">Target modules</label>
+                <select id="targets"></select>
+              </div>
+            </div>
+            <!-- On its own line: at 350px the control panel gives each column
+                 ~150px, which is not enough for a label and a hint side by
+                 side without the label wrapping mid-word. -->
+            <p class="field-note" id="trainable-hint"></p>
+          </div>
+
+          <h2 class="panel-title mt-lg">Data &amp; schedule</h2>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="rows">Examples</label>
+              <input type="text" id="rows" inputmode="numeric" spellcheck="false" placeholder="52k">
+            </div>
+            <div class="field">
+              <label class="field-label" for="avglen">Avg tokens each</label>
+              <input type="number" id="avglen" min="1" max="1000000" step="1">
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="seq">Sequence length</label>
+              <input type="text" id="seq" inputmode="numeric" spellcheck="false" placeholder="2048">
+            </div>
+            <div class="field">
+              <label class="field-label" for="epochs">Epochs</label>
+              <input type="number" id="epochs" min="0.1" max="100" step="0.1">
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="batch">
+                Batch
+                <span class="field-hint">per device</span>
+              </label>
+              <input type="number" id="batch" min="1" max="256" step="1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="accum">Grad accum</label>
+              <input type="number" id="accum" min="1" max="256" step="1">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="optimizer">Optimizer</label>
+            <select id="optimizer"></select>
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="packing-label">Sequence packing</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="packing-label">
+              <input type="radio" name="packing" id="packing-on" value="1">
+              <label for="packing-on">Packed</label>
+              <input type="radio" name="packing" id="packing-off" value="0">
+              <label for="packing-off">Padded</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="gc-label">Gradient checkpointing</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="gc-label">
+              <input type="radio" name="gc" id="gc-on" value="1">
+              <label for="gc-on">On</label>
+              <input type="radio" name="gc" id="gc-off" value="0">
+              <label for="gc-off">Off</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="stack-label">Training stack</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="stack-label">
+              <input type="radio" name="stack" id="stack-unsloth" value="1">
+              <label for="stack-unsloth">Unsloth</label>
+              <input type="radio" name="stack" id="stack-stock" value="0">
+              <label for="stack-stock">HF + FA2</label>
+            </div>
+          </div>
+
+          <h2 class="panel-title mt-lg">Hardware</h2>
+
+          <div class="field">
+            <label class="field-label" for="hw">Accelerator</label>
+            <select id="hw"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="vram">Memory (GB)</label>
+              <input type="number" id="vram" min="1" max="2048" step="1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="count">How many</label>
+              <input type="number" id="count" min="1" max="64" step="1">
+            </div>
+          </div>
+
+          <div class="field" id="parallel-field">
+            <span class="field-label" id="parallel-label">Parallelism</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="parallel-label">
+              <input type="radio" name="parallel" id="parallel-ddp" value="ddp">
+              <label for="parallel-ddp">DDP</label>
+              <input type="radio" name="parallel" id="parallel-fsdp" value="fsdp">
+              <label for="parallel-fsdp">FSDP / ZeRO-3</label>
+            </div>
+          </div>
+
+          <button class="btn btn-full mt-md" type="button" id="share">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="btn-text">Copy link to this result</span>
+          </button>
+        </form>
+
+        <!-- RESULTS ------------------------------------------------------- -->
+        <div class="result-stack">
+
+          <div class="verdict" id="verdict" role="status" aria-live="polite">
+            <span class="verdict-icon" id="verdict-icon"></span>
+            <div>
+              <p class="verdict-title" id="verdict-title">—</p>
+              <p class="verdict-detail" id="verdict-detail"></p>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <p class="stat-label">Peak VRAM</p>
+              <p class="stat-value" id="stat-mem">—</p>
+              <p class="stat-sub" id="stat-mem-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Wall clock</p>
+              <p class="stat-value" id="stat-time">—</p>
+              <p class="stat-sub" id="stat-time-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Rental cost</p>
+              <p class="stat-value" id="stat-cost">—</p>
+              <p class="stat-sub" id="stat-cost-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Throughput</p>
+              <p class="stat-value" id="stat-tps">—<span class="stat-unit">tok/s</span></p>
+              <p class="stat-sub" id="stat-tps-sub"></p>
+            </div>
+          </div>
+
+          <section class="panel panel-pad" aria-labelledby="breakdown-title">
+            <h2 class="panel-title" id="breakdown-title">Memory breakdown</h2>
+
+            <div class="meter">
+              <div class="meter-track" id="meter" role="img" aria-labelledby="meter-desc"></div>
+              <p class="visually-hidden" id="meter-desc"></p>
+              <div class="meter-scale">
+                <span>0</span>
+                <span id="meter-budget-label"></span>
+              </div>
+            </div>
+
+            <ul class="legend" id="legend"></ul>
+
+            <details class="details">
+              <summary>Table view &amp; working</summary>
+              <div class="details-body">
+                <div class="table-wrap">
+                  <table>
+                    <caption>Peak training memory</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Component</th>
+                        <th scope="col" class="num">Size</th>
+                        <th scope="col" class="num">Share</th>
+                        <th scope="col">How it is derived</th>
+                      </tr>
+                    </thead>
+                    <tbody id="breakdown-rows"></tbody>
+                  </table>
+                </div>
+                <p class="note-inline" id="method-note"></p>
+              </div>
+            </details>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="run-title">
+            <h2 class="panel-title" id="run-title">The run</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>What the trainer will actually do</caption>
+                <tbody id="run-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="run-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="hwcompare-title">
+            <h2 class="panel-title" id="hwcompare-title">Same run, other hardware</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>Rentable cards, same configuration</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">GPU</th>
+                    <th scope="col" class="num">Peak VRAM</th>
+                    <th scope="col">Fits</th>
+                    <th scope="col" class="num">Throughput</th>
+                    <th scope="col" class="num">Time</th>
+                    <th scope="col" class="num">Cost</th>
+                  </tr>
+                </thead>
+                <tbody id="hw-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline">
+              Rental prices are typical community-cloud rates and move constantly —
+              treat them as an order of magnitude, not a quote. Time assumes a
+              single card of that type unless you set a count above.
+            </p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="assumptions-title">
+            <h2 class="panel-title" id="assumptions-title">What this assumes</h2>
+            <ul class="notes">
+              <li>
+                <strong>The logits tensor is real memory.</strong>
+                <code>seq × batch × vocab × 4 bytes</code>, and modern vocabularies
+                are 128k+. At 2048 tokens and batch 2 that is 2.1 GB — twenty-five
+                times the size of a rank-16 adapter. Fused cross-entropy (Unsloth,
+                Liger) avoids materialising it, and that is most of where the
+                "70% less VRAM" claim comes from.
+              </li>
+              <li>
+                <strong>LoRA parameters are counted from real shapes.</strong>
+                A rank-r adapter on a d<sub>in</sub>×d<sub>out</sub> projection is
+                <code>r × (d_in + d_out)</code>, summed over the model's actual
+                layers. The "LoRA is 0.5% of the model" heuristic is only true near
+                8B — it falls to 0.29% at 70B.
+              </li>
+              <li>
+                <strong>LoRA backward is 4 FLOPs per parameter, not 6.</strong>
+                A frozen base still needs input gradients but no weight gradients.
+                Gradient checkpointing adds one extra forward pass, taking it to 6.
+              </li>
+              <li>
+                <strong>DDP replicates, FSDP shards.</strong> Adding GPUs under DDP
+                buys throughput and no memory at all — each card still holds the
+                whole model. If the run does not fit on one card, more cards under
+                DDP will not help.
+              </li>
+              <li>
+                <strong>Expect ±25%.</strong> Peak memory depends on allocator
+                behaviour and on your longest batch; throughput depends on kernel
+                versions. Leave headroom, and run one epoch before booking a week
+                of GPU time.
+              </li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/train-page.js"></script>
+</body>
+</html>

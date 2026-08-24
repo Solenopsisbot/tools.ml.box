@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>tools.ml.box — calculators for running and training LLMs</title>
+  <meta name="description" content="Practical calculators for local LLM work: VRAM fit and speed estimates from real model architectures, and finetuning time and cost. Every result is a shareable URL.">
+  <link rel="canonical" href="https://tools.ml.box/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/">
+  <meta property="og:title" content="tools.ml.box — calculators for running and training LLMs">
+  <meta property="og:description" content="VRAM fit, inference speed, finetuning cost. Real architecture configs, honest KV cache maths, and every result is a shareable URL.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="tools.ml.box — calculators for running and training LLMs">
+  <meta name="twitter:description" content="VRAM fit, inference speed, finetuning cost. Every result is a shareable URL.">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": "https://tools.ml.box/#website",
+    "name": "tools.ml.box",
+    "url": "https://tools.ml.box/",
+    "description": "Calculators for running and training large language models.",
+    "isPartOf": { "@id": "https://ml.box/#website" },
+    "author": { "@id": "https://ml.box/#person" }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram">VRAM &amp; speed</a>
+        <a class="nav-link" href="/train">Finetune cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">tools.ml.box</p>
+        <h1 class="page-title">Calculators for people who actually run the models</h1>
+        <p class="page-lede">
+          Small, fast, dependency-free tools for local LLM work. Real architecture
+          configs rather than rules of thumb, so grouped-query attention, sliding
+          windows and MoE routing all land where they should. Every result is a
+          URL you can paste at someone.
+        </p>
+      </div>
+
+      <section aria-labelledby="tools-title">
+        <h2 class="section-title" id="tools-title">Tools</h2>
+        <ul class="tool-list" id="tool-list"></ul>
+      </section>
+
+      <section class="page-section" aria-labelledby="how-title">
+        <h2 class="section-title" id="how-title">How these work</h2>
+        <div class="prose">
+          <p>
+            Everything runs in your browser. There is no backend, no account, no
+            analytics and no network request after the page loads — which is also
+            why the whole configuration lives in the query string. That is the
+            share button: the URL <em>is</em> the state.
+          </p>
+          <p>
+            The numbers are estimates built from first principles, with constants
+            calibrated against published llama.cpp and vLLM benchmarks. They are
+            good enough to decide what to download and which card to buy, and they
+            are not a substitute for benchmarking your own stack. Where a figure
+            is shakier than it looks, the tool says so.
+          </p>
+        </div>
+      </section>
+
+      <section class="page-section" aria-labelledby="planned-title">
+        <h2 class="section-title" id="planned-title">Planned</h2>
+        <p class="prose mb-md">
+          A public backlog, not a promise. Nudge me if one of these would actually
+          be useful to you — that moves it up the list.
+        </p>
+        <ul class="planned-list" id="planned-list"></ul>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,1352 @@
+/* ==========================================================================
+   tools.ml.box
+
+   Extends the ml.box design system rather than reinventing it: same fonts,
+   same tokens, same frosted-glass-over-shader stack. What is new here is the
+   component set a calculator needs — control panels, stat tiles, a memory
+   meter, result tables.
+
+   Conventions (inherited, keep them):
+     - tabs for indentation
+     - every colour, radius and spacing value goes through a :root custom
+       property; no magic hex in a component rule
+     - all motion sits behind prefers-reduced-motion
+   ========================================================================== */
+
+/* ==========================================================================
+   Self-hosted fonts — byte-identical to ml.box, same immutable cache policy
+   ========================================================================== */
+
+@font-face {
+	font-family: 'Outfit';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/outfit-latin.woff2') format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: 'Outfit';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/outfit-latin-ext.woff2') format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400 800;
+	font-display: swap;
+	src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400 800;
+	font-display: swap;
+	src: url('/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ==========================================================================
+   Design tokens
+   ========================================================================== */
+
+:root {
+	--bg-dark: #050608;
+	--surface: #0c0f17;
+	--card-bg: rgba(12, 15, 23, 0.78);
+	--panel-bg: rgba(12, 15, 23, 0.62);
+	--card-border: rgba(255, 255, 255, 0.1);
+	--card-border-hover: rgba(255, 255, 255, 0.22);
+
+	--text-main: #f8fafc;
+	--text-body: #e2e8f0;
+	--text-muted: #94a3b8;
+	--text-dim: #64748b;
+
+	/* Brand ramp. Sequential by construction: one continuous cyan -> violet
+	   sweep. Correct for gradients and accents, WRONG for categorical series
+	   (indigo and violet are indistinguishable under protanopia) — see the
+	   separate --series-* tokens below. */
+	--brand-cyan: #38bdf8;
+	--brand-indigo: #818cf8;
+	--brand-violet: #c084fc;
+
+	/* Categorical series palette for the memory breakdown.
+	   Validated against surface #0c0f17 in dark mode: passes lightness band,
+	   chroma floor, CVD adjacent separation (worst ΔE 10.2 tritan), the
+	   normal-vision floor (ΔE 21.1) and 3:1 contrast. Do not substitute
+	   "nicer" brand hues here without re-running the validator — the obvious
+	   cyan/indigo/violet triple fails CVD separation at ΔE 0.9. */
+	--series-1: #0891b2; /* weights   */
+	--series-2: #8b5cf6; /* KV cache  */
+	--series-3: #ec4899; /* overhead  */
+
+	/* Status. Reserved: never reused as a series colour, and never the only
+	   signal — every use ships with an icon and a word. */
+	--status-good: #10b981;
+	--status-warn: #f59e0b;
+	--status-bad: #ef4444;
+
+	--font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	--radius-lg: 24px;
+	--radius-md: 14px;
+	--radius-sm: 8px;
+
+	--focus-ring: 2px solid #7dd3fc;
+
+	--content-max: 1080px;
+	--gutter: 1.5rem;
+	--header-height: 58px;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+/* The UA stylesheet's `[hidden] { display: none }` loses to any author
+   `display` rule, and .field/.field-row both set `display: grid`. Without this
+   the conditional controls (LoRA rank on a full finetune, the multi-GPU split
+   on a single card) set the attribute and stay perfectly visible. */
+[hidden] {
+	display: none !important;
+}
+
+html {
+	scroll-behavior: smooth;
+	/* Never lock the viewport. Every page here is taller than one screen. */
+	overflow-y: scroll;
+}
+
+body {
+	width: 100%;
+	min-height: 100vh;
+	min-height: 100svh;
+	background-color: var(--bg-dark);
+	color: var(--text-main);
+	font-family: var(--font-sans);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	overflow-x: hidden;
+}
+
+/* ==========================================================================
+   Accessibility
+   ========================================================================== */
+
+.skip-link {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translate(-50%, -150%);
+	z-index: 100;
+	background: var(--surface);
+	color: var(--text-main);
+	border: 1px solid var(--card-border-hover);
+	border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+	padding: 0.7rem 1.2rem;
+	font-size: 0.85rem;
+	font-weight: 600;
+	text-decoration: none;
+	transition: transform 0.2s ease;
+}
+
+.skip-link:focus-visible {
+	transform: translate(-50%, 0);
+	outline: var(--focus-ring);
+	outline-offset: 2px;
+}
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+	outline: var(--focus-ring);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* ==========================================================================
+   Ambient background stack — same three fixed layers as ml.box.
+
+   The blur is heavier here than on the parent site: these pages are dense
+   numeric content and the shader competes with it in a way it does not
+   compete with a single profile card.
+   ========================================================================== */
+
+#webgl-canvas {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
+	pointer-events: none;
+}
+
+.frosted-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	backdrop-filter: blur(16px) saturate(130%);
+	-webkit-backdrop-filter: blur(16px) saturate(130%);
+	background: rgba(5, 6, 8, 0.52);
+	pointer-events: none;
+}
+
+.vignette {
+	position: fixed;
+	inset: 0;
+	z-index: 2;
+	background: radial-gradient(circle at center, transparent 35%, rgba(5, 6, 8, 0.88) 100%);
+	pointer-events: none;
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.site-header {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	background: rgba(5, 6, 8, 0.72);
+	backdrop-filter: blur(18px) saturate(150%);
+	-webkit-backdrop-filter: blur(18px) saturate(150%);
+	border-bottom: 1px solid var(--card-border);
+}
+
+.header-inner {
+	max-width: calc(var(--content-max) + var(--gutter) * 2);
+	margin-inline: auto;
+	min-height: var(--header-height);
+	padding: 0.5rem var(--gutter);
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	text-decoration: none;
+	color: var(--text-main);
+	flex-shrink: 0;
+}
+
+.brand-mark {
+	width: 26px;
+	height: 26px;
+	border-radius: 7px;
+	flex-shrink: 0;
+}
+
+.brand-text {
+	font-family: var(--font-mono);
+	font-weight: 600;
+	font-size: 0.86rem;
+	letter-spacing: 0.02em;
+}
+
+.brand-text .brand-sub {
+	color: var(--text-dim);
+}
+
+.site-nav {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	flex-wrap: wrap;
+}
+
+.nav-link {
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-decoration: none;
+	padding: 0.4rem 0.7rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid transparent;
+	transition:
+		color 0.2s ease,
+		background-color 0.2s ease,
+		border-color 0.2s ease;
+}
+
+.nav-link:hover {
+	color: var(--text-main);
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-link[aria-current='page'] {
+	color: var(--text-main);
+	background: rgba(255, 255, 255, 0.07);
+	border-color: var(--card-border);
+}
+
+.nav-link.is-external {
+	color: var(--text-dim);
+}
+
+/* ==========================================================================
+   Page layout
+   ========================================================================== */
+
+.app-container {
+	position: relative;
+	z-index: 3;
+	width: 100%;
+}
+
+.page {
+	max-width: calc(var(--content-max) + var(--gutter) * 2);
+	margin-inline: auto;
+	padding: clamp(2rem, 5vw, 3.25rem) var(--gutter) clamp(3.5rem, 9vw, 6rem);
+}
+
+.page-head {
+	margin-bottom: clamp(1.75rem, 4vw, 2.5rem);
+	max-width: 62ch;
+}
+
+.eyebrow {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	font-weight: 700;
+	color: var(--text-dim);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	margin-bottom: 0.5rem;
+}
+
+.page-title {
+	font-size: clamp(1.75rem, 6vw, 2.5rem);
+	font-weight: 800;
+	letter-spacing: -0.025em;
+	line-height: 1.1;
+	margin-bottom: 0.7rem;
+}
+
+.page-lede {
+	font-size: clamp(0.95rem, 2.5vw, 1.05rem);
+	line-height: 1.65;
+	color: var(--text-muted);
+}
+
+.section-title {
+	font-size: 1.15rem;
+	font-weight: 700;
+	letter-spacing: -0.015em;
+	margin-bottom: 1rem;
+}
+
+/* Two-column on desktop: controls left, results right. Collapses to a single
+   column early — the control panel needs ~340px before the selects start
+   truncating model names. */
+.tool-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 350px) minmax(0, 1fr);
+	gap: 1.5rem;
+	align-items: start;
+}
+
+@media (max-width: 940px) {
+	.tool-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* ==========================================================================
+   Panels
+   ========================================================================== */
+
+.panel {
+	position: relative;
+	min-width: 0;
+	background: var(--panel-bg);
+	backdrop-filter: blur(20px) saturate(150%);
+	-webkit-backdrop-filter: blur(20px) saturate(150%);
+	border: 1px solid var(--card-border);
+	border-radius: var(--radius-md);
+	box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+}
+
+.panel-pad {
+	padding: 1.25rem 1.35rem;
+}
+
+.panel-title {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	font-weight: 700;
+	color: var(--text-dim);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	margin-bottom: 1rem;
+}
+
+/* Desktop only: keep the controls in view while reading a long result column.
+   Never sticky on mobile, where it would eat most of the viewport. */
+@media (min-width: 941px) {
+	.controls {
+		position: sticky;
+		top: calc(var(--header-height) + 1rem);
+	}
+}
+
+.result-stack {
+	display: grid;
+	/* `minmax(0, 1fr)`, not the implicit `auto`. An auto track sizes to its
+	   max-content, so a wide table inside a panel makes the whole column wider
+	   than its parent — and because body has overflow-x:hidden, the excess is
+	   silently clipped rather than reported as a scrollbar. Explicitly allowing
+	   the track to shrink below max-content is what lets .table-wrap scroll
+	   instead. */
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1.25rem;
+	min-width: 0;
+}
+
+/* ==========================================================================
+   Form controls
+   ========================================================================== */
+
+.field {
+	display: grid;
+	gap: 0.35rem;
+	margin-bottom: 1rem;
+}
+
+.field:last-child {
+	margin-bottom: 0;
+}
+
+.field-label {
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	display: flex;
+	align-items: baseline;
+	gap: 0.4rem;
+}
+
+.field-hint {
+	font-family: var(--font-mono);
+	font-size: 0.68rem;
+	font-weight: 500;
+	color: var(--text-dim);
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+/* A hint that belongs to a whole row rather than to one label. */
+.field-note {
+	font-family: var(--font-mono);
+	font-size: 0.68rem;
+	font-weight: 500;
+	color: var(--text-dim);
+	margin: -0.5rem 0 1rem;
+}
+
+.field-note:empty {
+	display: none;
+}
+
+.field-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0.75rem;
+}
+
+select,
+input[type='text'],
+input[type='number'] {
+	width: 100%;
+	font-family: var(--font-sans);
+	font-size: 0.88rem;
+	font-weight: 500;
+	color: var(--text-main);
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.13);
+	border-radius: var(--radius-sm);
+	padding: 0.52rem 0.7rem;
+	transition:
+		border-color 0.2s ease,
+		background-color 0.2s ease;
+}
+
+select {
+	/* Native arrow is inconsistent and often light-on-light in dark mode. */
+	appearance: none;
+	background-image: linear-gradient(45deg, transparent 50%, #94a3b8 50%),
+		linear-gradient(135deg, #94a3b8 50%, transparent 50%);
+	background-position:
+		calc(100% - 15px) calc(50% + 1px),
+		calc(100% - 10px) calc(50% + 1px);
+	background-size: 5px 5px, 5px 5px;
+	background-repeat: no-repeat;
+	padding-right: 2rem;
+}
+
+select option,
+select optgroup {
+	background: var(--surface);
+	color: var(--text-main);
+}
+
+input[type='number'] {
+	font-family: var(--font-mono);
+}
+
+select:hover,
+input:hover {
+	border-color: rgba(255, 255, 255, 0.24);
+}
+
+select:focus,
+input:focus {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+/* Segmented radio group, used for things with two or three fixed choices
+   where a dropdown would hide the options that matter. */
+.segmented {
+	display: flex;
+	gap: 0.3rem;
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: var(--radius-sm);
+	padding: 0.22rem;
+}
+
+.segmented input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.segmented label {
+	flex: 1;
+	text-align: center;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	padding: 0.35rem 0.4rem;
+	border-radius: 6px;
+	cursor: pointer;
+	user-select: none;
+	transition:
+		background-color 0.2s ease,
+		color 0.2s ease;
+}
+
+.segmented label:hover {
+	color: var(--text-main);
+}
+
+.segmented input:checked + label {
+	background: rgba(255, 255, 255, 0.12);
+	color: var(--text-main);
+}
+
+.segmented input:focus-visible + label {
+	outline: var(--focus-ring);
+	outline-offset: 1px;
+}
+
+/* Buttons */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.45rem;
+	font-family: var(--font-sans);
+	font-size: 0.83rem;
+	font-weight: 600;
+	color: var(--text-main);
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: var(--radius-sm);
+	padding: 0.5rem 0.85rem;
+	cursor: pointer;
+	text-decoration: none;
+	transition:
+		background-color 0.2s ease,
+		border-color 0.2s ease,
+		color 0.2s ease;
+}
+
+.btn:hover {
+	background: rgba(255, 255, 255, 0.12);
+	border-color: rgba(255, 255, 255, 0.32);
+}
+
+.btn.is-copied {
+	color: #7dd3fc;
+	border-color: rgba(125, 211, 252, 0.45);
+}
+
+.btn-full {
+	width: 100%;
+}
+
+/* ==========================================================================
+   Verdict banner — the one-line answer, above all the detail.
+
+   Colour is never the only signal: each state carries an icon and a word.
+   ========================================================================== */
+
+.verdict {
+	display: flex;
+	align-items: flex-start;
+	min-width: 0;
+	gap: 0.8rem;
+	border-radius: var(--radius-md);
+	border: 1px solid;
+	padding: 1.05rem 1.25rem;
+	background: var(--panel-bg);
+	backdrop-filter: blur(20px) saturate(150%);
+	-webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+
+.verdict-icon {
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.verdict-title {
+	font-size: 1.05rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	margin-bottom: 0.2rem;
+}
+
+.verdict-detail {
+	font-size: 0.87rem;
+	line-height: 1.55;
+	color: var(--text-muted);
+}
+
+.verdict.is-good {
+	border-color: rgba(16, 185, 129, 0.4);
+	background: linear-gradient(rgba(16, 185, 129, 0.08), rgba(16, 185, 129, 0.03)), var(--panel-bg);
+}
+.verdict.is-good .verdict-icon,
+.verdict.is-good .verdict-title {
+	color: var(--status-good);
+}
+
+.verdict.is-warn {
+	border-color: rgba(245, 158, 11, 0.4);
+	background: linear-gradient(rgba(245, 158, 11, 0.08), rgba(245, 158, 11, 0.03)), var(--panel-bg);
+}
+.verdict.is-warn .verdict-icon,
+.verdict.is-warn .verdict-title {
+	color: var(--status-warn);
+}
+
+.verdict.is-bad {
+	border-color: rgba(239, 68, 68, 0.4);
+	background: linear-gradient(rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.03)), var(--panel-bg);
+}
+.verdict.is-bad .verdict-icon,
+.verdict.is-bad .verdict-title {
+	color: var(--status-bad);
+}
+
+/* ==========================================================================
+   Stat tiles
+
+   A hero number needs no chart. These are the headline results; everything
+   below them is the working.
+   ========================================================================== */
+
+.stat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.stat {
+	background: var(--panel-bg);
+	backdrop-filter: blur(20px) saturate(150%);
+	-webkit-backdrop-filter: blur(20px) saturate(150%);
+	border: 1px solid var(--card-border);
+	border-radius: var(--radius-md);
+	padding: 0.95rem 1.05rem;
+	min-width: 0;
+}
+
+.stat-label {
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	font-weight: 700;
+	color: var(--text-dim);
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	margin-bottom: 0.4rem;
+}
+
+.stat-value {
+	font-size: clamp(1.35rem, 4vw, 1.6rem);
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.1;
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+
+.stat-unit {
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: var(--text-dim);
+	margin-left: 0.25rem;
+	letter-spacing: 0;
+}
+
+.stat-sub {
+	font-size: 0.74rem;
+	color: var(--text-dim);
+	margin-top: 0.3rem;
+	line-height: 1.4;
+}
+
+/* ==========================================================================
+   Memory meter
+
+   One stacked bar against a fixed budget. Part-to-whole with a hard target is
+   exactly the job a meter does, and it is the only chart on the page, so it
+   gets the space.
+
+   Mark spec: 2px surface gaps between segments, rounded outer ends only, a
+   marker line for the budget, direct labels for every segment above 6%.
+   ========================================================================== */
+
+.meter {
+	margin-top: 0.25rem;
+}
+
+.meter-track {
+	position: relative;
+	display: flex;
+	gap: 2px; /* surface gap between adjacent fills — never let them touch */
+	height: 34px;
+	background: rgba(255, 255, 255, 0.045);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: var(--radius-sm);
+	padding: 3px;
+	overflow: hidden;
+}
+
+.meter-seg {
+	position: relative;
+	min-width: 2px;
+	border-radius: 2px;
+	transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Rounded data-ends: only the outer edges of the whole stack, so the bar
+   reads as one quantity rather than three floating blocks. */
+.meter-seg:first-child {
+	border-radius: 4px 2px 2px 4px;
+}
+
+.meter-seg:last-of-type {
+	border-radius: 2px 4px 4px 2px;
+}
+
+.meter-seg[data-series='1'] {
+	background: var(--series-1);
+}
+.meter-seg[data-series='2'] {
+	background: var(--series-2);
+}
+.meter-seg[data-series='3'] {
+	background: var(--series-3);
+}
+
+/* Overflow past the budget.
+   An OVERLAY, not another segment: the segments already sum to the total, so
+   appending a fourth one would double-count the excess and run the bar off the
+   end of its own track. This lies on top of whatever sits to the right of the
+   budget marker and says "this part has nowhere to live".
+   Hatched rather than solid, so it still reads as overflow under CVD, in
+   forced-colors mode, and on a monochrome print. */
+.meter-over {
+	position: absolute;
+	top: 3px;
+	bottom: 3px;
+	border-radius: 2px;
+	background: repeating-linear-gradient(
+		135deg,
+		rgba(239, 68, 68, 0.85) 0 5px,
+		rgba(239, 68, 68, 0.35) 5px 10px
+	);
+	box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.7);
+	pointer-events: none;
+}
+
+.meter-budget {
+	position: absolute;
+	top: -4px;
+	bottom: -4px;
+	width: 2px;
+	background: var(--text-main);
+	box-shadow: 0 0 0 1px rgba(5, 6, 8, 0.8);
+	pointer-events: none;
+}
+
+.meter-scale {
+	display: flex;
+	justify-content: space-between;
+	margin-top: 0.4rem;
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	color: var(--text-dim);
+}
+
+/* Legend is always present for >= 2 series: identity must never be
+   colour-alone. Each entry also carries its own value, which doubles as the
+   direct label the bar segments are too thin to hold. */
+.legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem 1.1rem;
+	margin-top: 0.9rem;
+	list-style: none;
+}
+
+.legend li {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.legend-swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 3px;
+	flex-shrink: 0;
+}
+
+.legend-swatch[data-series='1'] {
+	background: var(--series-1);
+}
+.legend-swatch[data-series='2'] {
+	background: var(--series-2);
+}
+.legend-swatch[data-series='3'] {
+	background: var(--series-3);
+}
+
+.legend-value {
+	font-family: var(--font-mono);
+	font-size: 0.76rem;
+	font-weight: 600;
+	color: var(--text-body);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Neutral "everything else" slice. Not a fourth category with an identity —
+   a residual — so it gets surface grey, not a series hue. */
+.meter-seg.is-rest {
+	background: rgba(255, 255, 255, 0.16);
+}
+
+.legend-swatch.is-rest {
+	background: rgba(255, 255, 255, 0.16);
+}
+
+/* The budget marker's legend entry mirrors the marker itself: a thin rule, not
+   a filled block, so the legend and the chart agree on what it means. */
+.legend-swatch.is-budget {
+	width: 2px;
+	height: 14px;
+	border-radius: 1px;
+	background: var(--text-main);
+}
+
+/* ==========================================================================
+   Tables — also the accessible view of the chart above them
+   ========================================================================== */
+
+.table-wrap {
+	overflow-x: auto;
+	margin-inline: -0.35rem;
+	padding-inline: 0.35rem;
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.83rem;
+}
+
+caption {
+	text-align: left;
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	font-weight: 700;
+	color: var(--text-dim);
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	padding-bottom: 0.7rem;
+}
+
+th {
+	text-align: left;
+	font-family: var(--font-mono);
+	font-size: 0.64rem;
+	font-weight: 700;
+	color: var(--text-dim);
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	padding: 0 0.6rem 0.5rem 0;
+	border-bottom: 1px solid var(--card-border);
+	white-space: nowrap;
+}
+
+td {
+	padding: 0.55rem 0.6rem 0.55rem 0;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+	color: var(--text-body);
+	vertical-align: baseline;
+}
+
+tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.num {
+	text-align: right;
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+th.num {
+	text-align: right;
+}
+
+.row-current {
+	background: rgba(125, 211, 252, 0.07);
+}
+
+.row-current td:first-child {
+	box-shadow: inset 2px 0 0 #7dd3fc;
+	padding-left: 0.6rem;
+}
+
+.cell-swatch {
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	border-radius: 3px;
+	margin-right: 0.5rem;
+	vertical-align: baseline;
+	background: rgba(255, 255, 255, 0.16);
+}
+
+.cell-swatch[data-series='1'] {
+	background: var(--series-1);
+}
+.cell-swatch[data-series='2'] {
+	background: var(--series-2);
+}
+.cell-swatch[data-series='3'] {
+	background: var(--series-3);
+}
+
+/* Row headers in the key/value "run summary" table read as labels, not as the
+   all-caps column headers the rest of the table uses. */
+.row-label {
+	text-transform: none;
+	letter-spacing: 0;
+	font-family: var(--font-sans);
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	padding: 0.55rem 0.9rem 0.55rem 0;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+	white-space: nowrap;
+}
+
+/* Fit/miss markers inside tables. Icon plus text, never colour alone —
+   which is also why they must not wrap: "✓" on one line and "yes" on the next
+   reads as two separate things. */
+.mark-yes,
+.mark-no {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.mark-yes {
+	color: var(--status-good);
+}
+
+.mark-no {
+	color: var(--text-dim);
+}
+
+/* ==========================================================================
+   Notes & inline callouts
+   ========================================================================== */
+
+.notes {
+	display: grid;
+	gap: 0.55rem;
+	list-style: none;
+	font-size: 0.82rem;
+	line-height: 1.6;
+	color: var(--text-muted);
+}
+
+.notes li {
+	position: relative;
+	padding-left: 1.1rem;
+}
+
+.notes li::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0.6em;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--text-dim);
+}
+
+.note-inline {
+	font-size: 0.8rem;
+	line-height: 1.55;
+	color: var(--text-muted);
+	border-left: 2px solid rgba(255, 255, 255, 0.14);
+	padding-left: 0.75rem;
+	margin-top: 0.9rem;
+}
+
+.note-inline:empty {
+	display: none;
+}
+
+code,
+.mono {
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+	color: var(--text-body);
+}
+
+.details {
+	margin-top: 1rem;
+	border-top: 1px solid var(--card-border);
+	padding-top: 0.9rem;
+}
+
+.details > summary {
+	cursor: pointer;
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	list-style: none;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.details > summary::-webkit-details-marker {
+	display: none;
+}
+
+.details > summary::before {
+	content: '▸';
+	font-size: 0.7rem;
+	color: var(--text-dim);
+	transition: transform 0.2s ease;
+}
+
+.details[open] > summary::before {
+	transform: rotate(90deg);
+}
+
+.details > summary:hover {
+	color: var(--text-main);
+}
+
+.details-body {
+	margin-top: 0.85rem;
+}
+
+/* ==========================================================================
+   Index page — tool cards
+   ========================================================================== */
+
+.tool-list {
+	list-style: none;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 0.9rem;
+}
+
+.tool-card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	height: 100%;
+	background: var(--panel-bg);
+	backdrop-filter: blur(20px) saturate(150%);
+	-webkit-backdrop-filter: blur(20px) saturate(150%);
+	border: 1px solid var(--card-border);
+	border-radius: var(--radius-md);
+	padding: 1.2rem 1.3rem;
+	text-decoration: none;
+	color: inherit;
+	box-shadow: 0 18px 40px -20px rgba(0, 0, 0, 0.7);
+	transition:
+		background-color 0.25s ease,
+		border-color 0.25s ease,
+		transform 0.25s ease,
+		box-shadow 0.25s ease;
+}
+
+.tool-card:hover {
+	background: rgba(255, 255, 255, 0.07);
+	border-color: var(--card-border-hover);
+	transform: translateY(-2px);
+	box-shadow: 0 22px 44px -18px rgba(0, 0, 0, 0.75);
+}
+
+.tool-card-head {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.tool-card-name {
+	font-size: 1.02rem;
+	font-weight: 700;
+	letter-spacing: -0.015em;
+}
+
+.tool-card-arrow {
+	margin-left: auto;
+	flex-shrink: 0;
+	color: var(--text-dim);
+	transition:
+		transform 0.25s ease,
+		color 0.25s ease;
+}
+
+.tool-card:hover .tool-card-arrow {
+	color: var(--text-main);
+	transform: translate(2px, -2px);
+}
+
+.tool-card-blurb {
+	font-size: 0.87rem;
+	line-height: 1.55;
+	color: var(--text-muted);
+}
+
+.tag-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-top: auto;
+	padding-top: 0.5rem;
+	list-style: none;
+}
+
+.tag {
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	color: var(--text-dim);
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	padding: 0.2rem 0.45rem;
+	border-radius: 5px;
+}
+
+/* Planned tools: deliberately flatter than the live cards so the difference is
+   visible before you read a word. */
+.planned-list {
+	list-style: none;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	gap: 0.75rem;
+}
+
+.planned {
+	border: 1px dashed rgba(255, 255, 255, 0.13);
+	border-radius: var(--radius-md);
+	padding: 0.9rem 1rem;
+	background: rgba(255, 255, 255, 0.015);
+}
+
+.planned-name {
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: var(--text-body);
+	margin-bottom: 0.25rem;
+}
+
+.planned-blurb {
+	font-size: 0.8rem;
+	line-height: 1.5;
+	color: var(--text-dim);
+}
+
+.page-section {
+	margin-top: clamp(2.5rem, 6vw, 3.5rem);
+}
+
+.prose {
+	font-size: 0.9rem;
+	line-height: 1.7;
+	color: var(--text-muted);
+	max-width: 68ch;
+}
+
+.prose p + p {
+	margin-top: 0.8rem;
+}
+
+.prose a {
+	color: #7dd3fc;
+}
+
+/* ==========================================================================
+   Utilities
+
+   Deliberately few. They exist because the Content-Security-Policy forbids
+   inline style attributes (see public/_headers) — anything that would have
+   been a one-off `style="..."` has to be a class instead.
+   ========================================================================== */
+
+.mt-lg {
+	margin-top: 1.5rem;
+}
+
+.mt-md {
+	margin-top: 1.25rem;
+}
+
+.mb-md {
+	margin-bottom: 1rem;
+}
+
+.push-right {
+	margin-left: auto;
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+
+.site-footer {
+	position: relative;
+	z-index: 3;
+	border-top: 1px solid var(--card-border);
+	background: rgba(5, 6, 8, 0.6);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+}
+
+.footer-inner {
+	max-width: calc(var(--content-max) + var(--gutter) * 2);
+	margin-inline: auto;
+	padding: 1.5rem var(--gutter);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1.25rem;
+	align-items: center;
+	font-size: 0.78rem;
+	color: var(--text-dim);
+}
+
+.site-footer a {
+	color: var(--text-muted);
+	text-decoration: none;
+}
+
+.site-footer a:hover {
+	color: var(--text-main);
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 560px) {
+	.field-row {
+		grid-template-columns: 1fr;
+	}
+
+	.header-inner {
+		gap: 0.5rem;
+	}
+
+	.site-nav {
+		width: 100%;
+		margin-left: 0;
+	}
+
+	.nav-link {
+		padding: 0.35rem 0.55rem;
+		font-size: 0.8rem;
+	}
+}
+
+/* ==========================================================================
+   Reduced motion
+   The shader stops animating itself (see bg-shader.js) — this covers CSS.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
+
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+
+	.tool-card:hover {
+		transform: none;
+	}
+
+	.tool-card:hover .tool-card-arrow {
+		transform: none;
+	}
+}

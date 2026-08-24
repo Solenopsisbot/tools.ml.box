@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050608">
+
+  <title>VRAM &amp; speed calculator — tools.ml.box</title>
+  <meta name="description" content="Will this LLM fit in your VRAM, and how fast will it run? Real attention shapes, honest KV cache maths for GQA, sliding-window and MLA models, and bandwidth-bound throughput estimates.">
+  <link rel="canonical" href="https://tools.ml.box/vram">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tools.ml.box">
+  <meta property="og:url" content="https://tools.ml.box/vram">
+  <meta property="og:title" content="VRAM &amp; speed calculator — tools.ml.box">
+  <meta property="og:description" content="Will this LLM fit, and how fast will it run? Real architecture configs, honest KV cache, bandwidth-bound throughput.">
+  <meta property="og:image" content="https://tools.ml.box/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="VRAM &amp; speed calculator — tools.ml.box">
+  <meta name="twitter:description" content="Will this LLM fit, and how fast will it run?">
+  <meta name="twitter:image" content="https://tools.ml.box/og.png">
+  <meta name="twitter:image:alt" content="tools.ml.box — the isometric AI box logo beside the tools.ml.box wordmark.">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <canvas id="webgl-canvas" aria-hidden="true"></canvas>
+  <div class="frosted-backdrop" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-text">tools<span class="brand-sub">.ml.box</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Tools">
+        <a class="nav-link" href="/vram" aria-current="page">VRAM &amp; speed</a>
+        <a class="nav-link" href="/train">Finetune cost</a>
+        <a class="nav-link is-external" href="https://ml.box" rel="noopener">ml.box ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="app-container">
+    <div class="page">
+
+      <div class="page-head">
+        <p class="eyebrow">Inference</p>
+        <h1 class="page-title">VRAM &amp; speed</h1>
+        <p class="page-lede">
+          Whether a model fits, and how fast it will decode once it does. Uses
+          the real attention shape of each model — grouped-query head counts,
+          sliding windows, MoE routing, MLA latents — because those change the
+          answer by multiples, not percentages.
+        </p>
+      </div>
+
+      <div class="tool-grid">
+
+        <!-- CONTROLS ------------------------------------------------------ -->
+        <form class="panel panel-pad controls" id="controls" autocomplete="off">
+          <h2 class="panel-title">Configuration</h2>
+
+          <div class="field">
+            <label class="field-label" for="model">Model</label>
+            <select id="model"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="quant">
+              Weight quantisation
+              <span class="field-hint" id="quant-bpw"></span>
+            </label>
+            <select id="quant"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="ctx">
+                Context
+                <span class="field-hint" id="ctx-native"></span>
+              </label>
+              <input type="text" id="ctx" inputmode="numeric" spellcheck="false" placeholder="32k">
+            </div>
+            <div class="field">
+              <label class="field-label" for="kv">KV cache</label>
+              <select id="kv"></select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="batch">
+              Concurrent sequences
+              <span class="field-hint">multiplies KV</span>
+            </label>
+            <input type="number" id="batch" min="1" max="512" step="1">
+          </div>
+
+          <h2 class="panel-title mt-lg">Hardware</h2>
+
+          <div class="field">
+            <label class="field-label" for="hw">Accelerator</label>
+            <select id="hw"></select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="vram">Memory (GB)</label>
+              <input type="number" id="vram" min="1" max="2048" step="1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="count">How many</label>
+              <input type="number" id="count" min="1" max="64" step="1">
+            </div>
+          </div>
+
+          <div class="field" id="split-field">
+            <span class="field-label" id="split-label">Multi-GPU split</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="split-label">
+              <input type="radio" name="split" id="split-layer" value="layer">
+              <label for="split-layer">Layer (llama.cpp)</label>
+              <input type="radio" name="split" id="split-tensor" value="tensor">
+              <label for="split-tensor">Tensor (vLLM)</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="ram">
+              CPU offload
+              <span class="field-hint">if it doesn't fit</span>
+            </label>
+            <select id="ram"></select>
+          </div>
+
+          <button class="btn btn-full mt-md" type="button" id="share">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="btn-text">Copy link to this result</span>
+          </button>
+        </form>
+
+        <!-- RESULTS ------------------------------------------------------- -->
+        <div class="result-stack">
+
+          <div class="verdict" id="verdict" role="status" aria-live="polite">
+            <span class="verdict-icon" id="verdict-icon"></span>
+            <div>
+              <p class="verdict-title" id="verdict-title">—</p>
+              <p class="verdict-detail" id="verdict-detail"></p>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <p class="stat-label">Total memory</p>
+              <p class="stat-value" id="stat-total">—</p>
+              <p class="stat-sub" id="stat-total-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Decode</p>
+              <p class="stat-value" id="stat-decode">—<span class="stat-unit">tok/s</span></p>
+              <p class="stat-sub" id="stat-decode-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Prefill</p>
+              <p class="stat-value" id="stat-prefill">—<span class="stat-unit">tok/s</span></p>
+              <p class="stat-sub" id="stat-prefill-sub"></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Max context</p>
+              <p class="stat-value" id="stat-maxctx">—</p>
+              <p class="stat-sub">that fits entirely in memory</p>
+            </div>
+          </div>
+
+          <!-- Memory breakdown: one stacked meter against a fixed budget. -->
+          <section class="panel panel-pad" aria-labelledby="breakdown-title">
+            <h2 class="panel-title" id="breakdown-title">Memory breakdown</h2>
+
+            <div class="meter">
+              <div class="meter-track" id="meter" role="img" aria-labelledby="meter-desc"></div>
+              <p class="visually-hidden" id="meter-desc"></p>
+              <div class="meter-scale">
+                <span>0</span>
+                <span id="meter-budget-label"></span>
+              </div>
+            </div>
+
+            <ul class="legend" id="legend"></ul>
+
+            <details class="details">
+              <summary>Table view &amp; working</summary>
+              <div class="details-body">
+                <div class="table-wrap">
+                  <table>
+                    <caption>Memory breakdown</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Component</th>
+                        <th scope="col" class="num">Size</th>
+                        <th scope="col" class="num">Share</th>
+                        <th scope="col">How it is derived</th>
+                      </tr>
+                    </thead>
+                    <tbody id="breakdown-rows"></tbody>
+                  </table>
+                </div>
+                <p class="note-inline" id="arch-note"></p>
+              </div>
+            </details>
+          </section>
+
+          <!-- Quant ladder: the "what should I actually download" table. -->
+          <section class="panel panel-pad" aria-labelledby="ladder-title">
+            <h2 class="panel-title" id="ladder-title">Quantisation ladder</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>Same model and context, every quantisation level</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Quant</th>
+                    <th scope="col" class="num">Weights</th>
+                    <th scope="col" class="num">Total</th>
+                    <th scope="col">Fits</th>
+                    <th scope="col" class="num">Decode</th>
+                    <th scope="col" class="num">Max ctx</th>
+                  </tr>
+                </thead>
+                <tbody id="ladder-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline">
+              Rows are the same model at the same context on the same hardware —
+              only the weight precision changes. The highlighted row is your
+              current selection.
+            </p>
+          </section>
+
+          <!-- Context ladder: how speed and memory decay as context grows. -->
+          <section class="panel panel-pad" aria-labelledby="ctxladder-title">
+            <h2 class="panel-title" id="ctxladder-title">Context scaling</h2>
+            <div class="table-wrap">
+              <table>
+                <caption>Same model and quantisation, varying context</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Context</th>
+                    <th scope="col" class="num">KV cache</th>
+                    <th scope="col" class="num">Total</th>
+                    <th scope="col">Fits</th>
+                    <th scope="col" class="num">Decode</th>
+                    <th scope="col" class="num">Time to first token</th>
+                  </tr>
+                </thead>
+                <tbody id="ctx-rows"></tbody>
+              </table>
+            </div>
+            <p class="note-inline" id="ctx-note"></p>
+          </section>
+
+          <section class="panel panel-pad" aria-labelledby="assumptions-title">
+            <h2 class="panel-title" id="assumptions-title">What this assumes</h2>
+            <ul class="notes">
+              <li>
+                <strong>Decode is memory-bound.</strong> Speed is bytes read per
+                token divided by achieved bandwidth, where bytes read is the
+                active weights <em>plus the whole KV cache</em>. That last term is
+                why a model runs slower at 100k context than at zero, which most
+                calculators never show you.
+              </li>
+              <li>
+                <strong>Prefill is compute-bound.</strong> Two FLOPs per active
+                parameter per token, against dense FP16 tensor throughput at a
+                realistic 45% MFU. Marketing FLOPS numbers assume 2:1 sparsity
+                that no LLM runtime achieves; the figures here do not.
+              </li>
+              <li>
+                <strong>Bits-per-weight are measured, not nominal.</strong> Q4_K_M
+                is 4.83 bpw in real files, not 4.00 — K-quants carry block scales
+                and keep some tensors at higher precision. Using the nominal width
+                underestimates every K-quant by 15–20%.
+              </li>
+              <li>
+                <strong>Sliding-window and MLA models are modelled properly.</strong>
+                Gemma 3 keeps a 1024-token window on five of every six layers, and
+                DeepSeek compresses KV to a 576-value latent. Treating either as
+                plain GQA overstates the cache by up to 10×.
+              </li>
+              <li>
+                <strong>Expect ±20%.</strong> These are calibrated first-principles
+                estimates, not benchmarks. Runtime, driver, kernel and flash-attention
+                choices all move the number. Use it to decide what to download; use
+                a real benchmark to decide what to ship.
+              </li>
+            </ul>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>A sub-site of <a href="https://ml.box" rel="noopener">ml.box</a></span>
+      <span>Runs entirely in your browser</span>
+      <span class="push-right"><a href="https://github.com/Solenopsisbot" rel="noopener">GitHub</a></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/vram.js"></script>
+</body>
+</html>
